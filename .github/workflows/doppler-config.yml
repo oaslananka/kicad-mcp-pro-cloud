@@ -1,0 +1,28 @@
+name: Doppler Configuration Validation
+# PRs and forks never receive secrets.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main' && github.repository == 'oaslananka/kicad-mcp-pro-cloud'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Install official Doppler CLI
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4 pinned
+      - name: Validate runtime configuration (no values logged)
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$DOPPLER_TOKEN" || { echo 'DOPPLER_TOKEN repository secret missing'; exit 1; }
+          doppler run -- npm run config:check
