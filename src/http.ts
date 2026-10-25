@@ -32,8 +32,9 @@ function validHost(req: IncomingMessage, publicOrigin: string): boolean {
   const host = req.headers.host;
   if (typeof host !== "string" || host.includes(",") || host.includes("@")) return false;
   if (host === expected.host) return true;
-  return (expected.hostname === "127.0.0.1" || expected.hostname === "localhost")
-    && new RegExp("^" + expected.hostname.replaceAll(".", "\\.") + ":[0-9]{1,5}$").test(host);
+  if (expected.hostname === "127.0.0.1") return /^127\.0\.0\.1:[0-9]{1,5}$/.test(host);
+  if (expected.hostname === "localhost") return /^localhost:[0-9]{1,5}$/.test(host);
+  return false;
 }
 function validOrigin(req: IncomingMessage, config: Config): boolean {
   const origin = req.headers.origin;
@@ -42,7 +43,18 @@ function validOrigin(req: IncomingMessage, config: Config): boolean {
 }
 
 export function createHttpServer(config: Config, inventory: Inventory, verify: Verifier): Server {
-  return createServer(async (req, res) => {
+  return createServer((req, res) => {
+    void handleRequest(req, res, config, inventory, verify).catch(() => {
+      if (!res.headersSent) deny(res, 500, "internal_error");
+      else res.end();
+    });
+  });
+}
+
+async function handleRequest(
+  req: IncomingMessage, res: ServerResponse, config: Config,
+  inventory: Inventory, verify: Verifier
+): Promise<void> {
     try {
       if (!validHost(req, config.publicOrigin) || !validOrigin(req, config)) {
         deny(res, 403, "origin_or_host_not_allowed");
@@ -64,10 +76,10 @@ export function createHttpServer(config: Config, inventory: Inventory, verify: V
       }
       if (path === "/" && req.method === "GET") {
         res.writeHead(200, {
-          ...noCache, "Content-Type": "text/html; charset=utf-8",
-          "Content-Security-Policy": "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+          ...noCache, "Content-Type": "text/plain; charset=utf-8",
+          "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'"
         });
-        res.end("<!doctype html><html lang=en><meta charset=utf-8><title>KiCad MCP Pro Cloud</title><h1>KiCad MCP Pro Cloud</h1><p>Secure MCP foundation. User registration and local device pairing are not yet available.</p></html>");
+        res.end("KiCad MCP Pro Cloud: secure MCP foundation. User registration and local device pairing are not yet available.");
         return;
       }
       if (path !== "/mcp") {
@@ -129,5 +141,4 @@ export function createHttpServer(config: Config, inventory: Inventory, verify: V
         res.end();
       }
     }
-  });
 }

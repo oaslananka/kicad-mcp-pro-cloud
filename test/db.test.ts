@@ -7,7 +7,7 @@ import { PgInventory } from "../src/store.js";
 const url = process.env.TEST_DATABASE_URL;
 test("postgres enforces ownership, disabled projects and opaque-only records", {skip:!url}, async()=>{
   const admin = new pg.Pool({connectionString:url});
-  const schema = await readFile(new URL("../db/001_inventory.sql",import.meta.url),"utf8");
+  const schema = await readFile(new URL("../db/001_inventory.pgsql",import.meta.url),"utf8");
   const deviceA = "2e850e45-e34b-4f14-a042-ed7449bf42de";
   const deviceB = "bb4de070-a6f1-45ab-9ad6-62983605d6be";
   const projectA = "6abdd0d3-4665-4db4-bc58-a8aca819a123";

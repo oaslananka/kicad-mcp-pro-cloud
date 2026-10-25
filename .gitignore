@@ -4,3 +4,6 @@ coverage/
 .env
 *.log
 .DS_Store
+
+# Local Doppler CLI scope (never commit)
+.doppler.yaml
