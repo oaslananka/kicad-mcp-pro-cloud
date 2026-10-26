@@ -83,11 +83,17 @@ async function fixture(db:import("pg").Pool):Promise<FixtureIds>{
     credentialPairing,freshPairing,oldBudget,freshBudget};
 }
 async function count(db:import("pg").Pool,table:string):Promise<number>{
-  // Input table is test-owned literal only.
-  const allowed=["connector_sessions","device_handshake_challenges","pairing_challenges",
-    "pairing_review_budget","pairing_device_budget"];
-  if(!allowed.includes(table))throw new Error("invalid table");
-  const result=await db.query<{n:number}>("SELECT count(*)::integer AS n FROM "+table);
+  // Only constant SQL text is allowed, including in test utilities.
+  let sql: string;
+  switch(table){
+    case "connector_sessions": sql="SELECT count(*)::integer AS n FROM connector_sessions";break;
+    case "device_handshake_challenges": sql="SELECT count(*)::integer AS n FROM device_handshake_challenges";break;
+    case "pairing_challenges": sql="SELECT count(*)::integer AS n FROM pairing_challenges";break;
+    case "pairing_review_budget": sql="SELECT count(*)::integer AS n FROM pairing_review_budget";break;
+    case "pairing_device_budget": sql="SELECT count(*)::integer AS n FROM pairing_device_budget";break;
+    default: throw new Error("invalid table");
+  }
+  const result=await db.query<{n:number}>(sql);
   return result.rows[0]?.n??0;
 }
 test("dry run never mutates; apply respects FK dependencies and original grace windows",

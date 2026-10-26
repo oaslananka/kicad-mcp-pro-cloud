@@ -19,6 +19,8 @@ const ORDER:readonly RetentionTable[]=[
   "pairing_review_budget",
   "pairing_device_budget"
 ];
+const PAIRING_GRACE="30 days";
+const BUDGET_GRACE="24 hours";
 export type RetentionAction="dry-run"|"apply";
 export type RetentionSummary={
   mode:RetentionAction;
@@ -28,77 +30,52 @@ export type RetentionSummary={
   tables:Record<RetentionTable,{eligible:number;hasMore:boolean;deleted:number}>;
 };
 
-/**
- * All SQL statements are static literals. Even internally enumerated
- * table identifiers must never be interpolated into query text.
- */
-async function countCandidates(
-  db:PoolClient,table:RetentionTable
-):Promise<number>{
-  switch(table){
-    case "connector_sessions": {
-      const result=await db.query<{eligible:string}>(
-        "SELECT count(*)::text AS eligible FROM (SELECT 1 FROM connector_sessions WHERE expires_at < statement_timestamp() - interval '30 days' LIMIT $1) bounded",[BATCH_SIZE+1]);
-      return Number(result.rows[0]?.eligible??0);
-    }
-    case "device_handshake_challenges": {
-      const result=await db.query<{eligible:string}>(
-        "SELECT count(*)::text AS eligible FROM (SELECT 1 FROM device_handshake_challenges WHERE expires_at < statement_timestamp() - interval '30 days' AND NOT EXISTS (SELECT 1 FROM connector_sessions s WHERE s.handshake_id=device_handshake_challenges.id) LIMIT $1) bounded",[BATCH_SIZE+1]);
-      return Number(result.rows[0]?.eligible??0);
-    }
-    case "pairing_challenges": {
-      const result=await db.query<{eligible:string}>(
-        "SELECT count(*)::text AS eligible FROM (SELECT 1 FROM pairing_challenges WHERE expires_at < statement_timestamp() - interval '30 days' AND NOT EXISTS (SELECT 1 FROM device_credentials c WHERE c.pairing_challenge_id=pairing_challenges.id) LIMIT $1) bounded",[BATCH_SIZE+1]);
-      return Number(result.rows[0]?.eligible??0);
-    }
-    case "pairing_review_budget": {
-      const result=await db.query<{eligible:string}>(
-        "SELECT count(*)::text AS eligible FROM (SELECT 1 FROM pairing_review_budget WHERE window_started_at < statement_timestamp() - interval '24 hours' LIMIT $1) bounded",[BATCH_SIZE+1]);
-      return Number(result.rows[0]?.eligible??0);
-    }
-    case "pairing_device_budget": {
-      const result=await db.query<{eligible:string}>(
-        "SELECT count(*)::text AS eligible FROM (SELECT 1 FROM pairing_device_budget WHERE window_started_at < statement_timestamp() - interval '24 hours' LIMIT $1) bounded",[BATCH_SIZE+1]);
-      return Number(result.rows[0]?.eligible??0);
-    }
-  }
+function selection(table:RetentionTable):{key:string;condition:string}{
+  if(table==="connector_sessions")return {
+    key:"id",
+    condition:"expires_at < statement_timestamp() - interval '"+PAIRING_GRACE+"'"
+  };
+  if(table==="device_handshake_challenges")return {
+    key:"id",
+    condition:"expires_at < statement_timestamp() - interval '"+PAIRING_GRACE+"' "+
+      "AND NOT EXISTS (SELECT 1 FROM connector_sessions s "+
+      "WHERE s.handshake_id=device_handshake_challenges.id)"
+  };
+  if(table==="pairing_challenges")return {
+    key:"id",
+    condition:"expires_at < statement_timestamp() - interval '"+PAIRING_GRACE+"' "+
+      "AND NOT EXISTS (SELECT 1 FROM device_credentials c "+
+      "WHERE c.pairing_challenge_id=pairing_challenges.id)"
+  };
+  if(table==="pairing_review_budget")return {
+    key:"owner_sub",
+    condition:"window_started_at < statement_timestamp() - interval '"+BUDGET_GRACE+"'"
+  };
+  return {
+    key:"budget_key",
+    condition:"window_started_at < statement_timestamp() - interval '"+BUDGET_GRACE+"'"
+  };
 }
-async function preview(
-  db:PoolClient,table:RetentionTable
-):Promise<{eligible:number;hasMore:boolean;deleted:number}>{
-  const count=await countCandidates(db,table);
+
+async function preview(db:PoolClient,table:RetentionTable):Promise<{eligible:number;hasMore:boolean;deleted:number}>{
+  const {condition}=selection(table);
+  const {rows}=await db.query<{eligible:string}>(
+    "SELECT count(*)::text AS eligible FROM (SELECT 1 FROM "+table+
+    " WHERE "+condition+" LIMIT $1) bounded",[BATCH_SIZE+1]
+  );
+  const count=Number(rows[0]?.eligible??0);
   return {eligible:Math.min(BATCH_SIZE,count),hasMore:count>BATCH_SIZE,deleted:0};
 }
 async function erase(db:PoolClient,table:RetentionTable):Promise<number>{
-  // Each statement locks exactly its candidate rows, then deletes only
-  // that fixed table. No delete cascades are used for referenced metadata.
-  switch(table){
-    case "connector_sessions": {
-      const result=await db.query(
-        "WITH victims AS (SELECT id FROM connector_sessions WHERE expires_at < statement_timestamp() - interval '30 days' ORDER BY id FOR UPDATE SKIP LOCKED LIMIT $1) DELETE FROM connector_sessions t USING victims WHERE t.id=victims.id", [BATCH_SIZE]);
-      return result.rowCount??0;
-    }
-    case "device_handshake_challenges": {
-      const result=await db.query(
-        "WITH victims AS (SELECT id FROM device_handshake_challenges WHERE expires_at < statement_timestamp() - interval '30 days' AND NOT EXISTS (SELECT 1 FROM connector_sessions s WHERE s.handshake_id=device_handshake_challenges.id) ORDER BY id FOR UPDATE SKIP LOCKED LIMIT $1) DELETE FROM device_handshake_challenges t USING victims WHERE t.id=victims.id", [BATCH_SIZE]);
-      return result.rowCount??0;
-    }
-    case "pairing_challenges": {
-      const result=await db.query(
-        "WITH victims AS (SELECT id FROM pairing_challenges WHERE expires_at < statement_timestamp() - interval '30 days' AND NOT EXISTS (SELECT 1 FROM device_credentials c WHERE c.pairing_challenge_id=pairing_challenges.id) ORDER BY id FOR UPDATE SKIP LOCKED LIMIT $1) DELETE FROM pairing_challenges t USING victims WHERE t.id=victims.id", [BATCH_SIZE]);
-      return result.rowCount??0;
-    }
-    case "pairing_review_budget": {
-      const result=await db.query(
-        "WITH victims AS (SELECT owner_sub FROM pairing_review_budget WHERE window_started_at < statement_timestamp() - interval '24 hours' ORDER BY owner_sub FOR UPDATE SKIP LOCKED LIMIT $1) DELETE FROM pairing_review_budget t USING victims WHERE t.owner_sub=victims.owner_sub", [BATCH_SIZE]);
-      return result.rowCount??0;
-    }
-    case "pairing_device_budget": {
-      const result=await db.query(
-        "WITH victims AS (SELECT budget_key FROM pairing_device_budget WHERE window_started_at < statement_timestamp() - interval '24 hours' ORDER BY budget_key FOR UPDATE SKIP LOCKED LIMIT $1) DELETE FROM pairing_device_budget t USING victims WHERE t.budget_key=victims.budget_key", [BATCH_SIZE]);
-      return result.rowCount??0;
-    }
-  }
+  const {key,condition}=selection(table);
+  // SKIP LOCKED leaves rows currently being reviewed/updated untouched.
+  // No CASCADE: credential-linked pairings and session-linked handshakes stay.
+  const result=await db.query(
+    "WITH victims AS (SELECT "+key+" FROM "+table+" WHERE "+condition+
+    " ORDER BY "+key+" FOR UPDATE SKIP LOCKED LIMIT $1) "+
+    "DELETE FROM "+table+" t USING victims "+
+    "WHERE t."+key+"=victims."+key,[BATCH_SIZE]);
+  return result.rowCount??0;
 }
 export async function pruneExpiredMetadata(
   pool:Pool,action:RetentionAction="dry-run"
