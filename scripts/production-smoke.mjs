@@ -29,8 +29,9 @@ const metadata=await fetch("https://kicad-mcp-pro.oaslananka.dev/.well-known/oau
 assert.equal(metadata.status,200);
 const resource=await metadata.json();
 assert.equal(resource.resource,"https://kicad-mcp-pro.oaslananka.dev/mcp");
-assert.ok(resource.authorization_servers?.includes(
-  "https://kicad-mcp-pro.oaslananka.dev/api/auth"));
+assert.deepEqual(resource.authorization_servers,
+  ["https://kicad-mcp-pro.oaslananka.dev/api/auth"],
+  "OAuth authorization server must match this production origin exactly");
 
 const unauthenticated=await fetch("https://kicad-mcp-pro.oaslananka.dev/mcp",{
   method:"POST",redirect:"manual",signal:AbortSignal.timeout(15000),
