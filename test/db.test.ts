@@ -9,6 +9,7 @@ test("postgres enforces ownership, disabled projects and opaque-only records", {
   const admin = new pg.Pool({connectionString:url});
   const schema = await readFile(new URL("../db/001_inventory.pgsql",import.meta.url),"utf8");
   const grantsSchema = await readFile(new URL("../db/002_client_grants.pgsql",import.meta.url),"utf8");
+  const revokeSchema=await readFile(new URL("../db/004_client_revocation.pgsql",import.meta.url),"utf8");
   const deviceA = "2e850e45-e34b-4f14-a042-ed7449bf42de";
   const deviceB = "bb4de070-a6f1-45ab-9ad6-62983605d6be";
   const projectA = "6abdd0d3-4665-4db4-bc58-a8aca819a123";
@@ -18,6 +19,7 @@ test("postgres enforces ownership, disabled projects and opaque-only records", {
   try {
     await admin.query(schema);
     await admin.query(grantsSchema);
+    await admin.query(revokeSchema);
     await admin.query("INSERT INTO devices (id,owner_sub,alias,enabled) VALUES ($1,'owner-a','A',true),($2,'owner-b','B',true)",[deviceA,deviceB]);
     await admin.query("INSERT INTO projects (id,device_id,owner_sub,alias,enabled) VALUES ($1,$2,'owner-a','USB-C',true),($3,$2,'owner-a','Disabled',false),($4,$5,'owner-b','Other',true)",[projectA,deviceA,projectDisabled,projectB,deviceB]);
     assert.equal((await inventory.listProjects("owner-a","client-a")).length,0);
@@ -39,6 +41,15 @@ test("postgres enforces ownership, disabled projects and opaque-only records", {
     assert.equal((await inventory.listProjects("owner-a","client-b")).length,0);
     const audit=await admin.query("SELECT operation FROM client_grant_audit WHERE owner_sub='owner-a' AND project_id=$1",[projectA]);
     assert.equal(audit.rows.length,2);
+    await inventory.setGrant("owner-a","portal",projectA,{clientId:"client-b",enabled:true,maxMode:"readonly"});
+    assert.equal(await inventory.revokeClient("owner-b","client-b"),0);
+    assert.equal((await inventory.listProjects("owner-a","client-b")).length,1);
+    assert.equal(await inventory.revokeClient("owner-a","client-b"),1);
+    assert.equal((await inventory.listProjects("owner-a","client-b")).length,0);
+    assert.equal((await inventory.listDevices("owner-a","client-b")).length,0);
+    assert.equal(await inventory.revokeClient("owner-a","client-b"),0);
+    const revokes=await admin.query("SELECT operation FROM client_grant_audit WHERE owner_sub='owner-a' AND project_id=$1 AND operation='client.revoke'",[projectA]);
+    assert.equal(revokes.rows.length,1);
     await assert.rejects(admin.query("INSERT INTO projects(id,device_id,owner_sub,alias) VALUES ('1961d3a0-5e7b-44a5-b903-3c4efb2531a7',$1,'owner-a','Injected')",[deviceB]));
   } finally {
     try{await admin.query("DELETE FROM client_grant_audit WHERE project_id=$1",[projectA]);}catch{}

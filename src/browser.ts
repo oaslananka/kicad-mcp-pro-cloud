@@ -94,6 +94,7 @@ async function accountPage(request:Request,identity:BrowserIdentity):Promise<Res
   if(!session?.user) return new Response(null,{status:303,headers:{"Location":"/sign-in","Cache-Control":"no-store"}});
   return page("KiCad MCP Pro Account",
     "<p>Signed in as "+escape(session.user.name??"User")+".</p>"+
+    "<p><a href=\"/connections\">Manage connected AI clients</a></p>"+
     "<p>Cloud device enrollment and project management are not yet available.</p>");
 }
 

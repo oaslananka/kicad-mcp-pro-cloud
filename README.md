@@ -95,3 +95,13 @@ first-party management client identity is needed for projects:manage.
 Approval and denial delegate to Better Auth and never automatically share
 a local KiCad project. OAuth consent revocation UX and live provider/client
 acceptance remain unfinished. Built-in authorization stays disabled by default.
+
+### Manage connected AI clients
+
+With built-in identity explicitly enabled and a verified user session,
+/connections lists OAuth consents and lets the owner remove an approved
+client. Revocation disables that client's grants before deleting the OAuth
+consent. Existing JWTs may remain cryptographically valid but discover no
+projects because every Cloud inventory read checks enabled grants. Real
+Google/GitHub login, live ChatGPT/Claude tests and device execution remain
+unfinished; built-in auth is still disabled by default.
