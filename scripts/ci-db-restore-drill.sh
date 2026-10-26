@@ -63,7 +63,7 @@ assert_eq() {
 echo 'Restore drill: applying reviewed database schema in source fixture'
 cli "$source" --status >/dev/null
 cli "$source" --apply >/dev/null
-assert_eq "$(sql "$source" 'SELECT count(*) FROM schema_migrations')" "8" "source migration count"
+assert_eq "$(sql "$source" 'SELECT count(*) FROM schema_migrations')" "9" "source migration count"
 
 # Only synthetic metadata; no physical KiCad paths, files or user credentials.
 sql "$source" "INSERT INTO devices(id,owner_sub,alias,enabled) VALUES
@@ -94,6 +94,14 @@ sql "$source" "INSERT INTO device_credentials
     repeat('A',64),repeat('a',64),
     'd83484f3-5515-46a5-96dd-3b92b73721c0')" >/dev/null
 
+# Synthetic pending nonce DIGEST only; neither a real nonce nor a signing key.
+sql "$source" "INSERT INTO device_handshake_challenges
+  (id,device_id,owner_sub,nonce_sha256,created_at,expires_at)
+  VALUES('41763f41-bebb-476c-a18a-58d303841e91',
+    'c3e0d32d-d8bf-49c8-ae15-f2acc4c147b7',
+    'fixture-owner',repeat('d',64),clock_timestamp(),
+    clock_timestamp() + interval '45 seconds')" >/dev/null
+
 echo 'Restore drill: streaming PostgreSQL custom backup to fresh target'
 docker exec "$source" pg_dump -Fc -U fixture -d cloud_fixture \
   --no-owner --no-acl |
@@ -103,7 +111,7 @@ docker exec "$source" pg_dump -Fc -U fixture -d cloud_fixture \
 echo 'Restore drill: checking migrations, permissions and authorization fences'
 cli "$target" --status >/dev/null
 cli "$target" --apply >/dev/null
-assert_eq "$(sql "$target" 'SELECT count(*) FROM schema_migrations')" "8" "restored migration ledger"
+assert_eq "$(sql "$target" 'SELECT count(*) FROM schema_migrations')" "9" "restored migration ledger"
 assert_eq "$(sql "$target" "SELECT count(*) FROM devices WHERE owner_sub='fixture-owner'")" "1" "device metadata"
 assert_eq "$(sql "$target" "SELECT count(*) FROM projects WHERE owner_sub='fixture-owner'")" "1" "project metadata"
 assert_eq "$(sql "$target" "SELECT count(*) FROM project_client_grants WHERE owner_sub='fixture-owner' AND client_id='fixture-client' AND enabled")" "1" "client grant metadata"
@@ -124,6 +132,8 @@ source_ledger="$(sql "$source" "SELECT md5(string_agg(version || ':' || checksum
 target_ledger="$(sql "$target" "SELECT md5(string_agg(version || ':' || checksum, '|' ORDER BY version)) FROM schema_migrations")"
 assert_eq "$(sql "$target" 'SELECT count(*) FROM pairing_challenges')" "1" "restored pairing metadata"
 assert_eq "$(sql "$target" 'SELECT count(*) FROM device_credentials WHERE revoked_at IS NULL')" "1" "restored public-key device credential"
+assert_eq "$(sql "$target" 'SELECT count(*) FROM device_handshake_challenges')" "1" "restored handshake challenge"
+assert_eq "$(sql "$target" "SELECT status FROM device_handshake_challenges WHERE id='41763f41-bebb-476c-a18a-58d303841e91'")" "pending" "handshake remains pending"
 assert_eq "$(sql "$target" "SELECT count(*) FROM device_credentials WHERE device_id='c3e0d32d-d8bf-49c8-ae15-f2acc4c147b7' AND owner_sub='fixture-owner'")" "1" "credential ownership"
 assert_eq "$target_ledger" "$source_ledger" "restored checksum ledger"
-echo 'Restore drill passed: all eight migrations, pairing metadata, cutoff policy and triggers recovered'
+echo 'Restore drill passed: all nine migrations, pairing metadata, cutoff policy and triggers recovered'
