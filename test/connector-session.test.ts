@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import {generateKeyPairSync,randomBytes,sign} from "node:crypto";
-import {readFile} from "node:fs/promises";
 import {test} from "node:test";
-import pg from "pg";
+import {inIsolatedDatabase} from "./isolated-db.js";
 import {PgPairingChallenges} from "../src/pairing-store.js";
 import {redemptionProof} from "../src/device-pairing.js";
 import {PgConnectorSessions,connectorSessionProof,connectorEventProof}
@@ -11,19 +10,11 @@ import {PgConnectorSessions,connectorSessionProof,connectorEventProof}
 const url=process.env.TEST_DATABASE_URL;
 test("Postgres bound sessions serialize proof, signed events, expiry, close and revocation",
   {skip:!url},async()=>{
-  const root=new pg.Pool({connectionString:url});
-  const schema="connector_"+randomBytes(7).toString("hex");
-  let db:pg.Pool|undefined;
-  try{
-    await root.query('CREATE SCHEMA "'+schema+'"');
-    const scoped=new URL(url!);
-    scoped.searchParams.set("options","-c search_path="+schema);
-    db=new pg.Pool({connectionString:scoped.toString(),max:8});
-    for(const file of ["001_inventory.pgsql","002_client_grants.pgsql",
-      "007_device_pairing.pgsql","008_device_credentials.pgsql",
-      "009_device_handshake.pgsql","010_connector_sessions.pgsql"]){
-      await db.query(await readFile(new URL("../db/"+file,import.meta.url),"utf8"));
-    }
+  await inIsolatedDatabase(url!, [
+    "001_inventory.pgsql","002_client_grants.pgsql",
+    "007_device_pairing.pgsql","008_device_credentials.pgsql",
+    "009_device_handshake.pgsql","010_connector_sessions.pgsql"
+  ],async db=>{
     const owner="owner-a",keys=generateKeyPairSync("ed25519");
     const publicKey=keys.publicKey.export({format:"der",type:"spki"}) as Buffer;
     const pair=new PgPairingChallenges(db,randomBytes(32));
@@ -146,9 +137,5 @@ test("Postgres bound sessions serialize proof, signed events, expiry, close and 
     assert.equal((await sessionsA.verifyEvent(owner,device,final.sessionId,
       final.binding,1,bytes,revocationProof)).kind,"unavailable");
     assert.equal((await sessionsA.issue(owner,device)).kind,"unavailable");
-  }finally{
-    await db?.end();
-    await root.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
-    await root.end();
-  }
+  });
 });
