@@ -6,6 +6,7 @@ import { createHttpServer } from "../src/http.js";
 import type { Config } from "../src/config.js";
 import type { Inventory, Device, Project } from "../src/store.js";
 import type { Actor, Verifier } from "../src/auth.js";
+import type { GrantManagement } from "../src/grants.js";
 
 const id = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
 const mockProject: Project = {
@@ -14,28 +15,41 @@ const mockProject: Project = {
   reason: "remote_connector_not_implemented"
 };
 const inventory: Inventory = {
-  async listDevices(owner): Promise<Device[]> {
-    return owner === "user-a"
+  async listDevices(owner,clientId): Promise<Device[]> {
+    return owner === "user-a" && clientId === "test-client"
       ? [{id:mockProject.deviceId, alias:"Workstation", enabled:true, lastSeenAt:null, connected:false}]
       : [];
   },
-  async listProjects(owner) { return owner === "user-a" ? [mockProject] : []; },
-  async getProject(owner, projectId) { return owner === "user-a" && projectId === id ? mockProject : null; }
+  async listProjects(owner, clientId) { return owner === "user-a" && clientId === "test-client" ? [mockProject] : []; },
+  async getProject(owner, clientId, projectId) { return owner === "user-a" && clientId === "test-client" && projectId === id ? mockProject : null; }
+};
+const managementCalls: unknown[] = [];
+const grants: GrantManagement = {
+  async setGrant(owner, client, project, policy) {
+    managementCalls.push({owner,client,project,policy});
+    if (owner !== "user-a") return false;
+    if (policy.maxMode === "write") throw new Error("POLICY_EXCEEDS_PROJECT");
+    return project === id;
+  }
 };
 const verify: Verifier = async token => {
-  if (token !== "test-user-a" && token !== "test-user-b") throw new Error("invalid");
-  const actor: Actor = { sub:token === "test-user-a" ? "user-a" : "user-b", clientId:"test-client", scopes:new Set(["projects:read"]) };
+  if (!["test-user-a","test-user-b","admin-user-a","rogue-admin"].includes(token)) throw new Error("invalid");
+  const actor: Actor = {
+    sub: token === "test-user-b" ? "user-b" : "user-a",
+    clientId: token === "admin-user-a" ? "portal-client" : token === "rogue-admin" ? "other-client" : "test-client",
+    scopes: new Set(["projects:read", ...(["admin-user-a","rogue-admin"].includes(token) ? ["projects:manage"] : [])])
+  };
   return actor;
 };
 const config: Config = {
   host:"127.0.0.1", port:0, publicOrigin:"http://127.0.0.1",
   issuer:"https://issuer.example", jwksUrl:"https://issuer.example/keys",
-  audience:"http://127.0.0.1/mcp", databaseUrl:"unused", allowedOrigins:[]
+  audience:"http://127.0.0.1/mcp", databaseUrl:"unused", allowedOrigins:[], managementClientId:"portal-client"
 };
 let server: Server;
 let endpoint: string;
 before(async () => {
-  server = createHttpServer(config, inventory, verify);
+  server = createHttpServer(config, inventory, verify, grants);
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   endpoint = "http://127.0.0.1:" + (server.address() as AddressInfo).port;
 });
@@ -103,4 +117,28 @@ test("rejects untrusted browser Origin and oversized messages", async () => {
 test("unknown URLs are not an enrollment API",async()=>{
   const r=await fetch(endpoint+"/api/devices",{method:"POST",headers:headers(),body:"{}"});
   assert.equal(r.status,404);
+});
+
+
+test("project grant endpoint requires first-party OAuth client and admin scope",async()=>{
+  const path="/api/v1/projects/"+id+"/grants";
+  const body=JSON.stringify({clientId:"claude-mcp-client",enabled:true,maxMode:"readonly"});
+  async function send(token:string, value=body) {
+    const result=await fetch(endpoint+path,{method:"PUT",headers:headers(token),body:value});
+    return result.status;
+  }
+  assert.equal(await send("invalid"),401);
+  assert.equal(await send("test-user-a"),403);
+  assert.equal(await send("rogue-admin"),403);
+  assert.equal(await send("admin-user-a",JSON.stringify({clientId:"client",enabled:true,maxMode:"readonly",localPath:"C:/Secrets"})),400);
+  assert.equal(await send("admin-user-a",JSON.stringify({clientId:"client",enabled:true,maxMode:"write"})),409);
+  assert.equal(await send("admin-user-a"),200);
+  assert.deepEqual(managementCalls.at(-1),{
+    owner:"user-a",client:"portal-client",project:id,
+    policy:{clientId:"claude-mcp-client",enabled:true,maxMode:"readonly"}
+  });
+  const foreign=await fetch(endpoint+"/api/v1/projects/8a1dcd04-15d1-4354-86f5-2918b4a8b2e9/grants",{
+    method:"PUT",headers:headers("admin-user-a"),body
+  });
+  assert.equal(foreign.status,404);
 });

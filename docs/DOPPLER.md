@@ -25,7 +25,7 @@ OAUTH_AUDIENCE - exact resource URI: public origin followed by /mcp
 DATABASE_URL   - PostgreSQL connection string for a provisioned database
 HOST           - optional bind interface, defaults to loopback
 PORT           - optional server port, defaults to 8787
-ALLOWED_ORIGINS - optional exact allowed HTTPS browser origins
+ALLOWED_ORIGINS - optional exact allowed HTTPS browser origins\nMANAGEMENT_CLIENT_ID - OAuth client_id of the first-party management UI, empty disables write API
 
 Never fill missing DB or OAuth details with invented production values.
 As of this change an OAuth authorization server, persistent database and TLS
@@ -64,3 +64,8 @@ Official:
 https://docs.doppler.com/docs/service-tokens
 https://docs.doppler.com/docs/cli
 https://www.doppler.com/blog/remove-hardcoded-secrets-github-actions
+
+New configuration name: MANAGEMENT_CLIENT_ID. This must be the signed
+OAuth client_id of the first-party web management application, not ChatGPT.
+If unset, all management mutations fail closed. Its value belongs only in
+Doppler. Do not invent a provider client id before client registration.

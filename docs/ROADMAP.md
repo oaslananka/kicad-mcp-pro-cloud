@@ -28,3 +28,12 @@
 - [ ] Production domain verification, external plugin reviews, end-to-end and rollback evidence
 
 **Do not treat a green CI workflow as any unverified acceptance gate.**
+
+## Issue #2 incremental progress
+- [x] Default-deny, per-OAuth-client project/device discovery.
+- [x] Scoped, first-party-only project-client grant mutation endpoint and audit.
+- [x] Separate first-party management-client allowlist from ChatGPT/Claude tool clients.
+- [ ] Actual IdP, provider-specific signed client_id mapping, login UI and social identity link.
+- [ ] Device pairing, revocation, controller/project APIs and real connector.
+- [ ] Public app, deploy, rollback, privacy and acceptance tests with physical KiCad.
+No overall DoD is considered met by the above partial implementation.
