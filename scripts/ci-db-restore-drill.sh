@@ -82,10 +82,10 @@ sql "$source" "INSERT INTO \"oauthClient\"(\"id\",\"clientId\",\"redirectUris\")
 
 # Synthetic metadata only; never a real device credential.
 sql "$source" "INSERT INTO pairing_challenges
-  (id,device_alias,device_public_key_der,device_fingerprint,user_code_mac,device_code_mac,expires_at)
+  (id,device_alias,device_public_key_der,device_fingerprint,user_code_mac,device_code_mac,expires_at,state,owner_sub)
   VALUES ('d83484f3-5515-46a5-96dd-3b92b73721c0','Fixture KiCad',
     repeat('A',64),repeat('a',64),repeat('b',64),repeat('c',64),
-    clock_timestamp() + interval '4 minutes')" >/dev/null
+    clock_timestamp() + interval '4 minutes','consumed','fixture-owner')" >/dev/null
 
 # Synthetic revocable public-key identity, never a real private credential.
 sql "$source" "INSERT INTO device_credentials
