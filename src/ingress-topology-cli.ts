@@ -5,7 +5,7 @@ import {inspectIngressTopology,type DockerContainerSnapshot,type DockerNetworkSn
 // This read-only CLI is intended for the authorized operator's VPS host.
 // Never mounts /var/run/docker.sock into the production application container.
 function dockerRead<T>(args:string[]):T{
-  const result=execFileSync("docker",args,{
+  const result=execFileSync("/usr/bin/docker",args,{
     encoding:"utf8",timeout:5_000,maxBuffer:256*1024,
     stdio:["ignore","pipe","pipe"]
   });
@@ -49,9 +49,9 @@ if(invalid){
     const appSnapshot=container(app);
     const proxySnapshot=container(proxy);
     if(appSnapshot.Name!=="/"+app&&appSnapshot.Name!==app)
-      throw Error("INVENTORY_IDENTITY_MISMATCH");
+      throw new Error("INVENTORY_IDENTITY_MISMATCH");
     if(proxySnapshot.Name!=="/"+proxy&&proxySnapshot.Name!==proxy)
-      throw Error("INVENTORY_IDENTITY_MISMATCH");
+      throw new Error("INVENTORY_IDENTITY_MISMATCH");
     const networkNames=[...new Set(Object.keys(appSnapshot.NetworkSettings.Networks)
       .concat(values.get("--network")!))];
     const networks=networkNames.map(network);
