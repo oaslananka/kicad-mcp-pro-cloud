@@ -9,7 +9,6 @@ coverage
 test
 scripts
 docs
-db
 infra
 *.log
 *.md

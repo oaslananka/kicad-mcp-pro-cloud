@@ -15,17 +15,25 @@ type AppliedRow = {version:number;file_name:string;checksum:string};
 export type MigrationResult = {applied:string[];pending:string[];current:number};
 
 async function loadMigrations():Promise<Migration[]> {
-  const result:Migration[]=[];
-  for(const file of migrationFiles){
+  return Promise.all(migrationFiles.map(async (file,index)=>{
     const version=Number(file.slice(0,3));
-    if(!Number.isSafeInteger(version) || version!==result.length+1){
+    if(!Number.isSafeInteger(version) || version!==index+1){
       throw new Error("Migration manifest version order is invalid");
     }
-    const sql=(await readFile(new URL("../db/"+file,import.meta.url),"utf8")).replace(/\r\n/g,"\n");
+    const sql=(await readFile(new URL("../db/"+file,import.meta.url),"utf8")).replaceAll("\\r\\n","\\n");
     if(!sql.trim()) throw new Error("Empty database migration in manifest");
-    result.push({version,file,sql,checksum:createHash("sha256").update(sql).digest("hex")});
-  }
-  return result;
+    return {version,file,sql,checksum:createHash("sha256").update(sql).digest("hex")};
+  }));
+}
+async function applyPending(db:PoolClient,pending:Migration[]):Promise<void>{
+  if(!pending.length) return;
+  const [migration,...remaining]=pending;
+  await db.query(migration.sql);
+  await db.query(
+    "INSERT INTO schema_migrations(version,file_name,checksum) VALUES($1,$2,$3)",
+    [migration.version,migration.file,migration.checksum]
+  );
+  await applyPending(db,remaining);
 }
 async function readApplied(db:PoolClient):Promise<AppliedRow[]>{
   const existing=await db.query<{present:string|null}>(
@@ -40,7 +48,7 @@ async function readApplied(db:PoolClient):Promise<AppliedRow[]>{
 function validateHistory(migrations:Migration[],applied:AppliedRow[]):void {
   for(const row of applied){
     const current=migrations.find(m=>m.version===row.version);
-    if(!current || row.file_name!==current.file || row.checksum!==current.checksum){
+    if(row.file_name!==current?.file || row.checksum!==current?.checksum){
       throw new Error("Recorded migration history conflicts with reviewed migration manifest");
     }
   }
@@ -84,13 +92,7 @@ export async function migrateDatabase(pool:Pool,action:"status"|"apply"):Promise
       );
       const applied=await readApplied(db);
       validateHistory(migrations,applied);
-      for(const migration of migrations.slice(applied.length)){
-        await db.query(migration.sql);
-        await db.query(
-          "INSERT INTO schema_migrations(version,file_name,checksum) VALUES($1,$2,$3)",
-          [migration.version,migration.file,migration.checksum]
-        );
-      }
+      await applyPending(db,migrations.slice(applied.length));
       await db.query("COMMIT");
       return summarize(migrations,migrations.map(m=>({
         version:m.version,file_name:m.file,checksum:m.checksum
