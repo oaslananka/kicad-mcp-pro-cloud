@@ -109,15 +109,17 @@ test("real MCP OAuth server: authorize redirect, session consent and PKCE code e
     });
     assert.equal(consent.status,200);
     const form=await consent.text();
-    const hidden=(name:string)=>(new RegExp('name="'+name+'" value="([^"]+)"').exec(form)?.[1]??"")
-      .replaceAll("&amp;","&").replaceAll("&quot;",'"');
-    assert.ok(hidden("oauth_query"));
-    assert.ok(hidden("csrf"));
+    // Real browsers decode HTML attributes on form submission. Instead
+    // of writing a custom decoder or dynamic RegExp in the test, send the
+    // same signed query that the server put in the consent redirect.
+    assert.match(form,/name="oauth_query" value="/);
+    const csrf=/name="csrf" value="([^"]+)"/.exec(form)?.[1]??"";
+    assert.ok(csrf);
     const csrfCookie=consent.headers.get("set-cookie")?.split(";")[0]??"";
     const approved=await fetch(address+"/consent",{
       method:"POST",headers:{"Origin":publicOrigin,
         "Content-Type":"application/x-www-form-urlencoded","Cookie":cookie+"; "+csrfCookie},
-      body:new URLSearchParams({oauth_query:hidden("oauth_query"),csrf:hidden("csrf"),decision:"approve"}),
+      body:new URLSearchParams({oauth_query:consentUrl.search.slice(1),csrf,decision:"approve"}),
       redirect:"manual"
     });
     assert.equal(approved.status,303);
