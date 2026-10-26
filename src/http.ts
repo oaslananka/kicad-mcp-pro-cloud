@@ -8,6 +8,7 @@ import type { Identity } from "./identity.js";
 import { browserResponse } from "./browser.js";
 import { consentResponse } from "./consent.js";
 import { connectionsResponse } from "./connections.js";
+import {devicesResponse,type DeviceManagementPort} from "./devices.js";
 import { oauthProviderResponse } from "./oauth-error.js";
 import { renderLanding } from "./browser-ui.js";
 import { uiCss } from "./ui-styles.js";
@@ -50,9 +51,9 @@ function validOrigin(req: IncomingMessage, config: Config): boolean {
     (origin === config.publicOrigin || config.allowedOrigins.includes(origin)));
 }
 
-export function createHttpServer(config: Config, inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">): Server {
+export function createHttpServer(config: Config, inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">,devices?:DeviceManagementPort): Server {
   return createServer((req, res) => {
-    void handleRequest(req, res, config, inventory, verify, grants, identity).catch(() => {
+    void handleRequest(req, res, config, inventory, verify, grants, identity,devices).catch(() => {
       if (!res.headersSent) deny(res, 500, "internal_error");
       else res.end();
     });
@@ -61,7 +62,7 @@ export function createHttpServer(config: Config, inventory: Inventory, verify: V
 
 async function handleRequest(
   req: IncomingMessage, res: ServerResponse, config: Config,
-  inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">
+  inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">,devices?:DeviceManagementPort
 ): Promise<void> {
     try {
       if (!validHost(req, config.publicOrigin) || !validOrigin(req, config)) {
@@ -74,7 +75,7 @@ async function handleRequest(
         res.end(uiCss);
         return;
       }
-      if (identity && (path === "/sign-in" || path === "/account" || path === "/consent" || path === "/connections" || path === "/connections/revoke" || path.startsWith("/auth/start/"))) {
+      if (identity && (path === "/sign-in" || path === "/account" || path === "/consent" || path === "/connections" || path === "/connections/revoke" || path === "/devices" || path === "/devices/revoke" || path.startsWith("/auth/start/"))) {
         const method=req.method??"GET";
         const headers=new Headers();
         for (const [name,value] of Object.entries(req.headers)) {
@@ -91,6 +92,8 @@ async function handleRequest(
           answer=await consentResponse(browserRequest,identity,config.publicOrigin,config.managementClientId);
         } else if (path==="/connections" || path==="/connections/revoke") {
           answer=await connectionsResponse(browserRequest,identity,config.publicOrigin,grants);
+        } else if(path==="/devices" || path==="/devices/revoke"){
+          answer=await devicesResponse(browserRequest,identity,config.publicOrigin,devices);
         } else {
           answer=await browserResponse(browserRequest,identity,config.publicOrigin);
         }

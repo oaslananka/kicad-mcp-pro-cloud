@@ -122,3 +122,18 @@ No overall DoD is considered met by the above partial implementation.
 - [ ] ChatGPT/Claude live MCP pairing, refresh and reconnect
 - [ ] Gemini/Grok compatibility based on verified host capabilities
 - [ ] Local connector and real project authorization
+
+
+## Authenticated device management increment (revoke only)
+
+- [x] Built-in browser-session-only device listing, escaped metadata, no
+      false online status and default-deny when the built-in provider is off.
+- [x] Owner/CSRF/Origin-bound irreversible device revocation shared with
+      pairing-store transactions, including live session and project/client
+      permission cutoff; browser and PostgreSQL tests.
+- [ ] Complete rate-limited authenticated pairing invitation and approval UX;
+      safe device enablement, key rotation, and project onboarding.
+- [ ] Live provider sign-in/host interoperability and production acceptance.
+
+This increment makes no claim that actual local KiCad devices are linked
+or production enrollment is available.

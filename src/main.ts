@@ -5,6 +5,7 @@ import {PgConnectorSessions} from "./connector-session.js";
 import {PgConnectorReadGate} from "./connector-read-gate.js";
 import {BoundConnectorConnections} from "./connector-transport-binding.js";
 import {attachConnectorWebSocket} from "./connector-ws.js";
+import {PgDeviceManagement} from "./device-management.js";
 import { createVerifier } from "./auth.js";
 import { createHttpServer } from "./http.js";
 import { PgGrantManagement } from "./grants.js";
@@ -13,15 +14,16 @@ import { configuredIdentity } from "./identity.js";
 const config = loadConfig();
 const identity = configuredIdentity(config);
 const inventory = new PgGrantManagement(config.databaseUrl,Boolean(identity));
-const server = createHttpServer(config, inventory, createVerifier(config), inventory, identity);
 // Deliberately disabled until trusted WSS ingress, device onboarding and
 // real local connector acceptance have been verified.
 const wsEnabled=process.env.CONNECTOR_WS_ENABLED==="true";
 if(wsEnabled&&!config.publicOrigin.startsWith("https://")){
   throw new Error("Connector WebSocket requires externally terminated HTTPS");
 }
-const connectorPool=wsEnabled?new Pool({connectionString:config.databaseUrl}):null;
-const connectorWs=connectorPool?attachConnectorWebSocket(server,{
+const connectorPool=(wsEnabled||Boolean(identity))?new Pool({connectionString:config.databaseUrl}):null;
+const deviceManagement=identity&&connectorPool?new PgDeviceManagement(connectorPool):undefined;
+const server=createHttpServer(config,inventory,createVerifier(config),inventory,identity,deviceManagement);
+const connectorWs=wsEnabled&&connectorPool?attachConnectorWebSocket(server,{
   publicOrigin:config.publicOrigin,
   proofs:new PgDeviceHandshakes(connectorPool),
   connections:new BoundConnectorConnections(
