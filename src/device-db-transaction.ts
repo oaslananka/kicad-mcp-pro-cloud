@@ -29,5 +29,5 @@ export async function lockActiveDeviceKey(
     "JOIN device_credentials c ON c.device_id=d.id AND c.owner_sub=d.owner_sub "+
     "WHERE d.id=$1 AND d.owner_sub=$2 AND d.enabled=true AND c.revoked_at IS NULL "+
     "FOR UPDATE OF d,c",[deviceId,owner]);
-  return result.rows[0]?.public_key_der.ù◊üäwù?null;
+  return result.rows[0]?.public_key_der??null;
 }
