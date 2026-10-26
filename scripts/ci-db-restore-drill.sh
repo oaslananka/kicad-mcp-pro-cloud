@@ -13,6 +13,8 @@ fi
 image=$1
 docker image inspect "$image" >/dev/null
 suffix="$(openssl rand -hex 7)"
+# Generated for disposable test containers only. Never persisted or logged.
+fixture_password="$(openssl rand -hex 24)"
 network="kicad-drill-$suffix"
 source="kicad-drill-source-$suffix"
 target="kicad-drill-target-$suffix"
@@ -26,7 +28,7 @@ for name in "$source" "$target"; do
   # Fixture-only credentials: no Doppler data and no published host ports.
   docker run --rm -d --name "$name" --network "$network" \
     --network-alias "$name" \
-    -e POSTGRES_USER=fixture -e POSTGRES_PASSWORD=fixture-only \
+    -e POSTGRES_USER=fixture -e "POSTGRES_PASSWORD=$fixture_password" \
     -e POSTGRES_DB=cloud_fixture postgres:17-alpine >/dev/null
   for attempt in $(seq 1 35); do
     if docker exec "$name" pg_isready -q -U fixture -d cloud_fixture; then break; fi
@@ -38,7 +40,7 @@ done
 cli() {
   local database_host=$1 action=$2
   docker run --rm --network "$network" \
-    -e "DATABASE_URL=postgresql://fixture:fixture-only@$database_host:5432/cloud_fixture" \
+    -e "DATABASE_URL=postgresql://fixture:$fixture_password@$database_host:5432/cloud_fixture" \
     "$image" node dist/migrations-cli.js "$action"
 }
 sql() {

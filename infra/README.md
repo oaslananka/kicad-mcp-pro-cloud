@@ -50,8 +50,8 @@ separate schema review. CI tests only in a disposable PostgreSQL 17 schema.
 The CI workflow runs scripts/ci-db-restore-drill.sh using the same secret-free
 OCI image it just built. The script creates its own two disposable PostgreSQL
 17 containers and an internal-only Docker network, with no host-bound ports.
-The only credentials in this fixture are literal, non-production test values;
-no Doppler or application environment is read.
+The database password is generated anew in memory for this disposable
+fixture; no Doppler or application environment is read.
 
 It explicitly applies reviewed migrations 001–006, seeds synthetic
 device/project/client metadata and an OAuth revocation cutoff, streams a
