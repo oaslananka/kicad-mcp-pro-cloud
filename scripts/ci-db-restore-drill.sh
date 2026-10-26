@@ -30,11 +30,15 @@ for name in "$source" "$target"; do
     --network-alias "$name" \
     -e POSTGRES_USER=fixture -e "POSTGRES_PASSWORD=$fixture_password" \
     -e POSTGRES_DB=cloud_fixture postgres:17-alpine >/dev/null
-  for attempt in $(seq 1 35); do
-    if docker exec "$name" pg_isready -q -U fixture -d cloud_fixture; then break; fi
+  attempts=0
+  until docker exec "$name" pg_isready -q -U fixture -d cloud_fixture; do
+    attempts=$((attempts+1))
+    if ((attempts>=35)); then
+      echo 'Temporary PostgreSQL fixture failed to become ready' >&2
+      exit 1
+    fi
     sleep 1
   done
-  docker exec "$name" pg_isready -q -U fixture -d cloud_fixture
 done
 
 cli() {
