@@ -189,3 +189,40 @@ The db/005_token_cutoff.pgsql migration must run before deploying this
 resource server version. There are no automatic startup migrations. Any
 database outage at the authorization check returns a fail-closed error.
 Auth mode remains external by default; no live OAuth provider was enabled.
+
+## Revocation versus a concurrent Better Auth refresh (Issue #9 increment)
+
+The pinned Better Auth 1.7.13 refresh operation CAS-revokes its predecessor,
+then INSERTs the successor in a separate transaction. MCP's default 30-second
+rotation replay is also written independently. A simple UPDATE of the rows
+present at revocation time cannot guarantee that an in-flight refresh does not
+insert a successor AFTER the user's revoke commit.
+
+Migration 006 introduces PostgreSQL fail-closed authorization issuance
+fences on the built-in issuer's refresh and opaque-access token INSERTs and
+refresh replay-cache UPDATEs. The fence shares the same per-owner/per-client
+transaction-scoped advisory lock with PgGrantManagement.revokeClient and
+checks client_token_cutoffs after acquiring that lock. An old authorization
+code lineage can never mint a successor after revocation. A new lineage is
+allowed only if a fresh, explicit OAuth consent was recorded *after* the
+cutoff; old code lineages remain denied even if the user reauthorizes.
+Absence of verified new consent or authorization code is denied.
+
+This is intentionally **not** a generic revocation provider or external
+issuer token revocation: it only applies to these pinned PostgreSQL tables.
+Keep the Better Auth version pinned. Review trigger behavior and migrations
+with any future OAuth provider upgrade; a changed issuance model may fail
+closed until reviewed. The built-in auth provider remains disabled by default.
+
+The disposable PostgreSQL acceptance test calls the **real**
+/api/auth/oauth2/token refresh endpoint and exercises rotation, 30-second
+retry, post-revoke rejection, other owner/client isolation, delayed token
+insertion interleaved with revocation, a later fresh consent with the OLD
+code lineage, a new code lineage, and rejected replay-cache resurrection.
+
+Known follow-up: Better Auth converts an issuance-fence SQL exception into
+an HTTP 500 rather than a user-friendly OAuth invalid_grant response. This
+remains a client UX and provider error mapping acceptance item. An actual
+Google/GitHub sign-in, genuine ChatGPT/Claude host pairing, and re-consent
+with a real authorization-code exchange are still required; synthetic
+consent/code-lineage DB records in this test do not establish that acceptance.
