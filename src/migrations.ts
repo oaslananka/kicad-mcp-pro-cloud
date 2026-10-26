@@ -8,7 +8,8 @@ export const migrationFiles = [
   "003_better_auth.pgsql",
   "004_client_revocation.pgsql",
   "005_token_cutoff.pgsql",
-  "006_oauth_issuance_fence.pgsql"
+  "006_oauth_issuance_fence.pgsql",
+  "007_device_pairing.pgsql"
 ] as const;
 
 type Migration = {version:number;file:string;sql:string;checksum:string};
