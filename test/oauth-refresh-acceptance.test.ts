@@ -134,6 +134,15 @@ test("real OAuth refresh grant: rotation, revoked predecessor/successor, other o
         ["owner-a-client-b"]
       );
       assert.equal(replay.rows[0]?.rotationReplayResponse,null);
+      await db.query(
+        'UPDATE "oauthRefreshToken" SET "rotationReplayResponse"=$1 WHERE "id"=$2',
+        ["new-consent-replay","new-authorization-token"]
+      );
+      const freshReplay=await db.query<{rotationReplayResponse:string|null}>(
+        'SELECT "rotationReplayResponse" FROM "oauthRefreshToken" WHERE "id"=$1',
+        ["new-authorization-token"]
+      );
+      assert.equal(freshReplay.rows[0]?.rotationReplayResponse,"new-consent-replay");
     } finally {
       await barrier.query("SELECT pg_advisory_unlock(9854742)");
       barrier.release();
