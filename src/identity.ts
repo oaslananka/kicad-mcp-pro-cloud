@@ -34,6 +34,7 @@ export function createIdentity(
       connectionTimeoutMillis: 3000
     }),
     emailAndPassword: { enabled: false },
+    user: { modelName: "users" },
     socialProviders: {
       google: { clientId: credentials.googleId, clientSecret: credentials.googleSecret },
       github: { clientId: credentials.githubId, clientSecret: credentials.githubSecret }
