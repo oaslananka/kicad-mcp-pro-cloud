@@ -1,4 +1,4 @@
-import { createHmac, createPublicKey, randomBytes, randomUUID, timingSafeEqual, verify } from "node:crypto";
+import { createHash, createHmac, createPublicKey, randomBytes, randomUUID, timingSafeEqual, verify } from "node:crypto";
 
 const USER_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const USER_CODE_LENGTH = 12;
@@ -93,7 +93,7 @@ export function issuePairing(
   const userCode = rawCode.slice(0, 6) + "-" + rawCode.slice(6);
   const deviceCode = randomBytes(32).toString("base64url");
   const devicePublicKeyDer = publicKey.export({ format: "der", type: "spki" }) as Buffer;
-  const fingerprint = createHmac("sha256", Buffer.alloc(0)).update(devicePublicKeyDer).digest("hex");
+  const fingerprint = createHash("sha256").update(devicePublicKeyDer).digest("hex");
   const record: PairingRecord = {
     id: randomUUID(),
     deviceAlias,
