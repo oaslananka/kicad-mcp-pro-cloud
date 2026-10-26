@@ -64,3 +64,22 @@ KiCad operations are not implemented in this increment.
 There is still no actual OAuth authorization server, browser signin,
 device pairing, persistent relay, local KiCad activity or production UI.
 The public endpoint remains unusable until the approved provider exists.
+
+## Better Auth prototype (not production-ready)
+
+A Better Auth 1.7.13 module composes jwt, mcp and CIMD using the MCP 2026-07-28
+profile. It is available only when AUTH_MODE=builtin is set; external issuer
+mode remains the default. Node routes the auth API and authorization-server
+metadata to Better Auth while retaining the resource-bound MCP API.
+
+The available modules include Google and GitHub provider adapters, encrypted
+stored account tokens, implicit-linking disabled, RS256 JWKS, staged rotation
+and a reviewed generated schema (db/003_better_auth.pgsql). Real provider
+authorization-code callbacks, interactive consent, PKCE with real AI clients,
+first-party session authorization, token audience compatibility and account
+link/revoke are NOT yet demonstrated. Provider credentials stay in Doppler.
+No public login or deploy is enabled by this commit.
+
+The OCI image is unprivileged and contains compiled application code only.
+See infra/README.md for IaC/deployment adoption boundaries. There is no
+presumption that running a container equals validated release.

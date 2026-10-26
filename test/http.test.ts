@@ -142,3 +142,30 @@ test("project grant endpoint requires first-party OAuth client and admin scope",
   });
   assert.equal(foreign.status,404);
 });
+
+
+test("identity routes are proxied only when enabled, preserving response cookies",async()=>{
+  const mockIdentity = {
+    handler: async (request: Request) => {
+      assert.equal(new URL(request.url).origin,config.publicOrigin);
+      return new Response(JSON.stringify({authenticated:false}),{
+        status:200,
+        headers:{"content-type":"application/json","set-cookie":"state=opaque; Path=/; HttpOnly; SameSite=Lax"}
+      });
+    }
+  };
+  const proxy=createHttpServer(config,inventory,verify,grants,mockIdentity);
+  await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
+  const port=(proxy.address() as AddressInfo).port;
+  try {
+    const base="http://127.0.0.1:"+port;
+    const discovery=await fetch(base+"/.well-known/oauth-authorization-server/api/auth");
+    assert.equal(discovery.status,200);
+    assert.match(discovery.headers.get("set-cookie")??"",/HttpOnly/);
+    const keys=await fetch(base+"/api/auth/jwks");
+    assert.equal(keys.status,200);
+    assert.deepEqual(await keys.json(),{authenticated:false});
+  } finally {
+    await new Promise<void>(resolve=>proxy.close(()=>resolve()));
+  }
+});

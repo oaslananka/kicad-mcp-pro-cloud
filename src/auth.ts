@@ -16,6 +16,7 @@ export function createVerifier(config: Pick<Config, "jwksUrl" | "issuer" | "audi
       issuer: config.issuer, audience: config.audience,
       algorithms: ["RS256", "ES256", "PS256"], clockTolerance: 5
     });
+    if (payload.cnf !== undefined) throw new Error("Proof-of-possession bound access tokens require DPoP verification");
     if (typeof payload.exp !== "number") throw new Error("Token missing expiry");
     if (typeof payload.sub !== "string" || payload.sub.length < 1) throw new Error("Token missing subject");
     const scope = typeof payload.scope === "string" ? payload.scope : "";

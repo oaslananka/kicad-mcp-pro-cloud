@@ -1,0 +1,15 @@
+.git
+.github
+node_modules
+dist
+coverage
+.env
+.env.*
+.doppler.yaml
+test
+scripts
+docs
+db
+infra
+*.log
+*.md

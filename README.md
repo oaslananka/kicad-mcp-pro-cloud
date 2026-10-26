@@ -60,3 +60,20 @@ which has an explicit, enabled project-client grant. Cross-client access is
 denied by default. A first-party management API can adjust grants, but requires
 projects:manage and a separate MANAGEMENT_CLIENT_ID from Doppler.
 This does not imply any device is paired or a KiCad operation can run.
+
+## Experimental Google/GitHub login and deployment packaging
+
+The optional Better Auth 1.7.13 authorization server uses MCP + CIMD,
+Google and GitHub identity adapters and generated SQL in db/003_better_auth.pgsql.
+It remains disabled until real provider registration and consent/login user
+experience are verified. It does not execute remote KiCad operations.
+
+Build the secret-free, unprivileged image locally:
+
+    docker build -t kicad-mcp-pro-cloud:local .
+
+Image builds and regular CI run without Doppler access. Keep only DOPPLER_TOKEN
+in GitHub secrets; inject runtime values from Doppler into a protected deploy
+environment, not the Docker build. See docs/DOPPLER.md and infra/README.md.
+No OpenTofu apply, Cloudflare resource creation or production deployment has
+occurred.
