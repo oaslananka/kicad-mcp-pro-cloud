@@ -25,9 +25,9 @@ function readCookie(request:Request,origin:string):string|null {
     .find(v=>v.startsWith(name+"="))?.slice(name.length+1)??null;
 }
 function page(connections:DisplayConnection[],status=200,extraCookie?:string,notice?:string):Response {
-  const headers=new Headers(htmlHeaders);
-  if(extraCookie) headers.append("Set-Cookie",extraCookie);
-  return new Response(renderConnectionsPage(connections,notice),{status,headers});
+  const responseHeaders=new Headers(htmlHeaders);
+  if(extraCookie) responseHeaders.append("Set-Cookie",extraCookie);
+  return new Response(renderConnectionsPage(connections,notice),{status,headers:responseHeaders});
 }
 function failure(code:number):Response {
   return page([],code,undefined,"Access could not be changed. Please reload your connections.");
@@ -46,8 +46,8 @@ async function validToken(request:Request,origin:string,proof:RevokeProof):Promi
   const state=readCookie(request,origin);
   if(!state || submitted.length>250) return false;
   const [stamp,nonce,sig,...extra]=submitted.split(".");
-  if(extra.length || !/^\d{13}$/.test(stamp??"") || !/^[a-zA-Z0-9_-]{22}$/.test(nonce??"") ||
-    !/^[a-zA-Z0-9_-]{43}$/.test(sig??"")) return false;
+  if(extra.length || !/^\d{13}$/.test(stamp) || !/^[a-zA-Z0-9_-]{22}$/.test(nonce) ||
+    !/^[a-zA-Z0-9_-]{43}$/.test(sig)) return false;
   if(state!==stamp+"."+nonce) return false;
   const time=Number(stamp);
   if(time>Date.now()+5000 || Date.now()-time>FIVE_MINUTES) return false;
