@@ -226,3 +226,26 @@ remains a client UX and provider error mapping acceptance item. An actual
 Google/GitHub sign-in, genuine ChatGPT/Claude host pairing, and re-consent
 with a real authorization-code exchange are still required; synthetic
 consent/code-lineage DB records in this test do not establish that acceptance.
+
+## OAuth refresh fence error mapping (Issue #9)
+
+The pinned Better Auth 1.7.13 provider returns a generic 500 when the
+PostgreSQL refresh issuance fence in migration 006 rejects a delayed INSERT.
+The Cloud HTTP boundary now maps **only** the specific provider error with
+SQLSTATE 23514 and message oauth_client_revoked to an RFC 6749 style
+HTTP 400 JSON invalid_grant response. It does not translate other database
+errors, other 500s, non-refresh token grants, or unrelated sign-in endpoints.
+
+An AsyncLocalStorage context binds Better Auth's onAPIError hook to each
+individual request, so concurrent refresh requests cannot inherit one another's
+fence denial decision. The error JSON contains no raw token, SQL, identifiers,
+or internal diagnostic. The provider's unclassified exceptions are logged with
+a deliberately generic message only. Database grant cutoffs and migration 006
+remain the authorization authority; HTTP mapping never bypasses those fences.
+
+The acceptance fixture invokes a **real listening Cloud HTTP server** backed
+by a real Better Auth handler and disposable PostgreSQL, rather than testing
+only a helper. It forces a paused successor INSERT during client revocation
+and asserts the resulting HTTP 400 invalid_grant. It also verifies another
+user/client's legitimate refresh still succeeds. This does not replace real
+Google/GitHub callback and ChatGPT/Claude client reauthentication testing.

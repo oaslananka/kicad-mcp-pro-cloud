@@ -4,6 +4,7 @@ import { mcp } from "@better-auth/mcp";
 import { cimd } from "@better-auth/cimd";
 import { fetchClientMetadataResource } from "@better-auth/cimd/node";
 import pg from "pg";
+import {captureOAuthProviderError} from "./oauth-error.js";
 import type { Config } from "./config.js";
 
 export type IdentitySecrets = {
@@ -33,6 +34,20 @@ export function createIdentity(
       max: 5,
       connectionTimeoutMillis: 3000
     }),
+    onAPIError:{
+      onError(error){
+        captureOAuthProviderError(error);
+        // Never expose provider exception details or OAuth credentials in logs.
+        if(!error || typeof error!=="object" || !("status" in error)){
+          // The SQL fence denial is expected after user-initiated revoke.
+          if(!(error && typeof error==="object" && "code" in error &&
+            error.code==="23514" && "message" in error &&
+            error.message==="oauth_client_revoked")) {
+            console.error("OAuth provider request failed");
+          }
+        }
+      }
+    },
     emailAndPassword: { enabled: false },
     user: { modelName: "users" },
     socialProviders: {

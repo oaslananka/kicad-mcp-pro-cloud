@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import {createHash,randomBytes} from "node:crypto";
 import {readFile} from "node:fs/promises";
 import {test} from "node:test";
+import type {Server} from "node:http";
+import type {AddressInfo} from "node:net";
 import pg from "pg";
 import {createIdentity} from "../src/identity.js";
 import {PgGrantManagement} from "../src/grants.js";
+import {createHttpServer} from "../src/http.js";
+import type {Config} from "../src/config.js";
 
 const databaseUrl=process.env.TEST_DATABASE_URL;
 const origin="http://127.0.0.1:8787";
@@ -14,6 +18,7 @@ test("real OAuth refresh grant: rotation, revoked predecessor/successor, other o
   const schema="refresh_"+randomBytes(6).toString("hex");
   let db:pg.Pool|undefined;
   let grantStore:PgGrantManagement|undefined;
+  let httpServer:Server|undefined;
   try {
     await admin.query('CREATE SCHEMA "'+schema+'"');
     const uri=new URL(databaseUrl!);
@@ -46,12 +51,21 @@ test("real OAuth refresh grant: rotation, revoked predecessor/successor, other o
       await db.query('INSERT INTO "oauthRefreshToken"("id","token","clientId","userId","scopes","createdAt","expiresAt","authorizationCodeId") VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
         [id,digest,client,owner,JSON.stringify(["offline_access","projects:read"]),now,expiry,"old-authorization-"+id]);
     }
+    const config:Config={
+      host:"127.0.0.1",port:0,publicOrigin:origin,
+      issuer:origin+"/api/auth",jwksUrl:origin+"/api/auth/jwks",
+      audience:origin+"/mcp",databaseUrl:scoped,
+      allowedOrigins:[],managementClientId:"portal-client"
+    };
+    httpServer=createHttpServer(config,grantStore,async()=>{throw new Error("unexpected auth")},grantStore,identity);
+    await new Promise<void>(resolve=>httpServer!.listen(0,"127.0.0.1",resolve));
+    const httpEndpoint="http://127.0.0.1:"+(httpServer.address() as AddressInfo).port;
     const refresh=async (token:string,client:string) => {
-      const response=await identity.handler(new Request(origin+"/api/auth/oauth2/token",{
+      const response=await fetch(httpEndpoint+"/api/auth/oauth2/token",{
         method:"POST",
         headers:{"Content-Type":"application/x-www-form-urlencoded"},
         body:new URLSearchParams({grant_type:"refresh_token",refresh_token:token,client_id:client})
-      }));
+      });
       const content=await response.text();
       const body=content ? JSON.parse(content) as Record<string,unknown> : {} as Record<string,unknown>;
       return {status:response.status,body};
@@ -107,7 +121,8 @@ test("real OAuth refresh grant: rotation, revoked predecessor/successor, other o
       );
       await barrier.query("SELECT pg_advisory_unlock(9854742)");
       const result=await concurrent;
-      assert.notEqual(result.status,200,"Late refresh cannot mint new credentials");
+      assert.equal(result.status,400,"Late refresh must map to OAuth invalid_grant");
+      assert.equal(result.body.error,"invalid_grant");
       const late=await db.query(
         'SELECT count(*)::integer AS count FROM "oauthRefreshToken" WHERE "userId"=$1 AND "clientId"=$2 AND "revoked" IS NULL',
         ["owner-a","client-b"]
@@ -148,6 +163,7 @@ test("real OAuth refresh grant: rotation, revoked predecessor/successor, other o
       barrier.release();
     }
   }finally{
+    if(httpServer) await new Promise<void>(resolve=>httpServer!.close(()=>resolve()));
     await grantStore?.close();
     await db?.end();
     await admin.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');

@@ -105,3 +105,10 @@ No overall DoD is considered met by the above partial implementation.
 - [ ] Real provider login/authorization-code and explicit re-consent callback
 - [ ] Host refresh/retry acceptance across ChatGPT, Claude, Gemini and Grok
 - [ ] Real release staging, restore and migration rollback/recovery drill
+
+## OAuth provider error mapping increment
+- [x] Only fenced late refresh maps to HTTP 400 invalid_grant
+- [x] Real Cloud HTTP server + pinned Better Auth + temporary PostgreSQL test
+- [x] Concurrent request-local error isolation, other failures stay HTTP 500
+- [ ] Real social-provider authorization-code exchange and fresh account consent
+- [ ] ChatGPT/Claude end-to-end reauthorization UX, followed by other hosts
