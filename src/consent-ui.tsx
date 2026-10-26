@@ -18,7 +18,7 @@ export function renderConsentPage(view:ConsentView):string {
           {view.kind==="notice" ? <p>{view.message}</p> : <>
             <p>{view.clientName} requests access to your account.</p>
             <p>Requested permissions:</p>
-            <ul>{view.scopes.map((scope,i)=><li key={i}>{scope}</li>)}</ul>
+            <ul>{Array.from(new Set(view.scopes)).map(scope=><li key={scope}>{scope}</li>)}</ul>
             {view.claims ? <p>Additional claims requested: {view.claims}</p> : null}
             <p>This does not automatically authorize access to any KiCad project. Project grants are separate.</p>
             <form action="/consent" method="post">
