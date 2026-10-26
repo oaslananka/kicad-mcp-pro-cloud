@@ -1,0 +1,176 @@
+import assert from "node:assert/strict";
+import {generateKeyPairSync,randomBytes,sign} from "node:crypto";
+import {createServer} from "node:http";
+import type {AddressInfo} from "node:net";
+import {test} from "node:test";
+import {WebSocket} from "ws";
+import {inIsolatedDatabase} from "./isolated-db.js";
+import {PgPairingChallenges} from "../src/pairing-store.js";
+import {deviceHandshakeProof,PgDeviceHandshakes} from "../src/device-handshake.js";
+import {redemptionProof} from "../src/device-pairing.js";
+import {connectorSessionProof,PgConnectorSessions} from "../src/connector-session.js";
+import {PgConnectorReadGate} from "../src/connector-read-gate.js";
+import {BoundConnectorConnections} from "../src/connector-transport-binding.js";
+import {attachConnectorWebSocket} from "../src/connector-ws.js";
+
+const url=process.env.TEST_DATABASE_URL;
+const migrations=[
+  "001_inventory.pgsql","002_client_grants.pgsql","005_token_cutoff.pgsql",
+  "007_device_pairing.pgsql","008_device_credentials.pgsql",
+  "009_device_handshake.pgsql","010_connector_sessions.pgsql"
+];
+
+function waitMessage(ws:WebSocket):Promise<Record<string,unknown>>{
+  return new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>{clean();reject(new Error("WEBSOCKET_TIMEOUT"));},8_000);
+    function onMessage(data:WebSocket.RawData){
+      clean();
+      try{resolve(JSON.parse(data.toString()) as Record<string,unknown>);}
+      catch{reject(new Error("INVALID_RESPONSE"));}
+    }
+    function onClose(){clean();reject(new Error("WEBSOCKET_CLOSED"));}
+    function clean(){
+      clearTimeout(timer);
+      ws.off("message",onMessage);ws.off("close",onClose);
+    }
+    ws.once("message",onMessage);ws.once("close",onClose);
+  });
+}
+function connect(uri:string,headers?:Record<string,string>):Promise<WebSocket>{
+  return new Promise((resolve,reject)=>{
+    const ws=new WebSocket(uri,{headers,perMessageDeflate:false});
+    const timer=setTimeout(()=>{ws.terminate();reject(new Error("CONNECT_TIMEOUT"));},8_000);
+    ws.once("open",()=>{clearTimeout(timer);resolve(ws);});
+    ws.once("error",error=>{clearTimeout(timer);reject(error);});
+  });
+}
+function waitClose(ws:WebSocket):Promise<number>{
+  return new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>{ws.terminate();reject(new Error("CLOSE_TIMEOUT"));},8_000);
+    ws.once("close",code=>{clearTimeout(timer);resolve(code);});
+  });
+}
+function send(ws:WebSocket,message:object):Promise<Record<string,unknown>>{
+  const next=waitMessage(ws);
+  ws.send(JSON.stringify(message));
+  return next;
+}
+function field(obj:Record<string,unknown>,key:string):string{
+  assert.equal(typeof obj[key],"string",key);
+  return obj[key] as string;
+}
+
+test("outbound local WebSocket proves enrolled device identity then binds signed session",
+  {skip:!url,timeout:60_000},async()=>{
+  await inIsolatedDatabase(url!,migrations,async db=>{
+    const owner="connector-user";
+    const keys=generateKeyPairSync("ed25519");
+    const publicKey=keys.publicKey.export({format:"der",type:"spki"}) as Buffer;
+    const pair=new PgPairingChallenges(db,randomBytes(32));
+    const pairing=await pair.issue("Loopback KiCad",publicKey);
+    assert.equal(await pair.review(pairing.id,owner,pairing.userCode,"approve"),"approved");
+    const enrolled=await pair.enroll(pairing.id,pairing.deviceCode,
+      sign(null,redemptionProof(pairing.id,pairing.deviceCode),keys.privateKey));
+    assert.equal(enrolled.kind,"enrolled");
+    if(enrolled.kind!=="enrolled")return;
+    const device=enrolled.deviceId;
+    // Only a fixture. No public enablement endpoint exists.
+    await db.query("UPDATE devices SET enabled=true WHERE id=$1",[device]);
+    const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
+    await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+    const port=(server.address() as AddressInfo).port;
+    const origin="http://127.0.0.1:"+port;
+    const attached=attachConnectorWebSocket(server,{
+      publicOrigin:origin,
+      proofs:new PgDeviceHandshakes(db),
+      connections:new BoundConnectorConnections(
+        new PgConnectorSessions(db),new PgConnectorReadGate(db))
+    });
+    let ws:WebSocket|undefined;
+    try{
+      // Browser-origin and query-string upgrade attempts must fail.
+      await assert.rejects(connect("ws://127.0.0.1:"+port+"/api/v1/connector/ws",
+        {Origin:"https://hostile.example"}),/403/);
+      await assert.rejects(connect("ws://127.0.0.1:"+port+"/api/v1/connector/ws?token=leak"),
+        /403/);
+      ws=await connect("ws://127.0.0.1:"+port+"/api/v1/connector/ws");
+      const hello=await send(ws,{kind:"device.hello",version:1,ownerSub:owner,deviceId:device});
+      assert.equal(hello.kind,"device.challenge");
+      const challengeId=field(hello,"challengeId"),nonce=field(hello,"nonce");
+      assert.ok(!JSON.stringify((await db.query(
+        "SELECT * FROM device_handshake_challenges WHERE id=$1",[challengeId])).rows[0]).includes(nonce));
+      const first=sign(null,deviceHandshakeProof(challengeId,device,nonce),
+        keys.privateKey).toString("base64url");
+      const session=await send(ws,{kind:"device.proof",version:1,signature:first});
+      assert.equal(session.kind,"connector.session_challenge");
+      const id=field(session,"sessionId");
+      const second=sign(null,connectorSessionProof(id,field(session,"challengeId"),
+        device,field(session,"nonce"),field(session,"binding")),
+        keys.privateKey).toString("base64url");
+      const ready=await send(ws,{kind:"connector.session_proof",version:1,signature:second});
+      assert.equal(ready.kind,"connector.ready");
+      assert.equal((await db.query("SELECT state FROM connector_sessions WHERE id=$1",
+        [id])).rows[0].state,"active");
+      const close=waitClose(ws);
+      ws.send(JSON.stringify({kind:"connector.execute",operation:"run_drc"}));
+      assert.equal(await close,1008); // No native KiCad relay.
+      // Closure should fence the persistent session as well.
+      let state="active";
+      for(let i=0;i<35;i++){
+        state=(await db.query("SELECT state FROM connector_sessions WHERE id=$1",[id])).rows[0].state;
+        if(state==="closed")break;
+        await new Promise(resolve=>setTimeout(resolve,30));
+      }
+      assert.equal(state,"closed");
+    }finally{
+      ws?.terminate();
+      await attached.close();
+      await new Promise<void>(resolve=>server.close(()=>resolve()));
+    }
+  });
+});
+
+test("invalid device signature never starts an authenticated connector session",
+  {skip:!url,timeout:60_000},async()=>{
+  await inIsolatedDatabase(url!,migrations,async db=>{
+    const owner="owner-invalid";
+    const keys=generateKeyPairSync("ed25519");
+    const der=keys.publicKey.export({format:"der",type:"spki"}) as Buffer;
+    const pair=new PgPairingChallenges(db,randomBytes(32));
+    const pending=await pair.issue("Bad signature test",der);
+    await pair.review(pending.id,owner,pending.userCode,"approve");
+    const enrolled=await pair.enroll(pending.id,pending.deviceCode,
+      sign(null,redemptionProof(pending.id,pending.deviceCode),keys.privateKey));
+    assert.equal(enrolled.kind,"enrolled");
+    if(enrolled.kind!=="enrolled")return;
+    await db.query("UPDATE devices SET enabled=true WHERE id=$1",[enrolled.deviceId]);
+    const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
+    await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+    const port=(server.address() as AddressInfo).port;
+    const attached=attachConnectorWebSocket(server,{
+      publicOrigin:"http://127.0.0.1:"+port,
+      proofs:new PgDeviceHandshakes(db),
+      connections:new BoundConnectorConnections(
+        new PgConnectorSessions(db),new PgConnectorReadGate(db))
+    });
+    let ws:WebSocket|undefined;
+    try{
+      ws=await connect("ws://127.0.0.1:"+port+"/api/v1/connector/ws");
+      const challenge=await send(ws,{kind:"device.hello",version:1,
+        ownerSub:owner,deviceId:enrolled.deviceId});
+      assert.equal(challenge.kind,"device.challenge");
+      const close=waitClose(ws);
+      const badKey=generateKeyPairSync("ed25519").privateKey;
+      ws.send(JSON.stringify({kind:"device.proof",version:1,
+        signature:sign(null,deviceHandshakeProof(field(challenge,"challengeId"),
+          enrolled.deviceId,field(challenge,"nonce")),badKey).toString("base64url")}));
+      assert.equal(await close,1008);
+      assert.equal((await db.query("SELECT count(*)::integer AS count FROM connector_sessions"))
+        .rows[0].count,0);
+    }finally{
+      ws?.terminate();
+      await attached.close();
+      await new Promise<void>(resolve=>server.close(()=>resolve()));
+    }
+  });
+});
