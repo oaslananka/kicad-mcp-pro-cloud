@@ -20,7 +20,7 @@ test("PostgreSQL handshake single-use, expiry, lockout, owner scope and revocati
     db=new pg.Pool({connectionString:scoped.toString(),max:8});
     for(const file of ["001_inventory.pgsql","002_client_grants.pgsql",
       "007_device_pairing.pgsql","008_device_credentials.pgsql",
-      "009_device_handshake.pgsql"]){
+      "009_device_handshake.pgsql","010_connector_sessions.pgsql"]){
       await db.query(await readFile(new URL("../db/"+file,import.meta.url),"utf8"));
     }
     const pair=new PgPairingChallenges(db,randomBytes(32));

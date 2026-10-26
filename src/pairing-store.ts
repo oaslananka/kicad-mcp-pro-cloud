@@ -137,6 +137,10 @@ export class PgPairingChallenges {
         "WHERE device_id=$1 AND owner_sub=$2",[id,owner]);
       await db.query("UPDATE devices SET enabled=false WHERE id=$1 AND owner_sub=$2",[id,owner]);
       await db.query(
+        "UPDATE connector_sessions SET state='revoked' "+
+        "WHERE device_id=$1 AND owner_sub=$2 AND state IN ('pending','active')",
+        [id,owner]);
+      await db.query(
         "UPDATE device_handshake_challenges SET status='revoked' "+
         "WHERE device_id=$1 AND owner_sub=$2 AND status='pending'",
         [id,owner]);
