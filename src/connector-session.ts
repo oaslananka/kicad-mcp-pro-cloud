@@ -1,5 +1,6 @@
 import {createHash,createPublicKey,randomBytes,randomUUID,timingSafeEqual,verify} from "node:crypto";
 import type {Pool,PoolClient} from "pg";
+import {lockActiveDeviceKey,withDeviceTransaction} from "./device-db-transaction.js";
 
 const ID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HASH=/^[0-9a-f]{64}$/;
@@ -65,27 +66,6 @@ export function connectorEventProof(
 export class PgConnectorSessions{
   constructor(private readonly pool:Pool){}
 
-  private async transact<T>(action:(db:PoolClient)=>Promise<T>):Promise<T>{
-    const db=await this.pool.connect();
-    try{
-      await db.query("BEGIN");
-      const result=await action(db);
-      await db.query("COMMIT");
-      return result;
-    }catch(error){
-      try{await db.query("ROLLBACK");}catch{/* preserve original error */}
-      throw error;
-    }finally{db.release();}
-  }
-  /** Always lock device/credential before session/challenge, matching revoke. */
-  private async key(db:PoolClient,owner:string,deviceId:string):Promise<string|null>{
-    const rows=await db.query<{public_key_der:string}>(
-      "SELECT c.public_key_der FROM devices d JOIN device_credentials c "+
-      "ON c.device_id=d.id AND c.owner_sub=d.owner_sub "+
-      "WHERE d.id=$1 AND d.owner_sub=$2 AND d.enabled AND c.revoked_at IS NULL "+
-      "FOR UPDATE OF d,c",[deviceId,owner]);
-    return rows.rows[0]?.public_key_der??null;
-  }
   private async row(db:PoolClient,owner:string,deviceId:string,sessionId:string):Promise<SessionRow|null>{
     const rows=await db.query<SessionRow>(
       "SELECT id,handshake_id,device_id,owner_sub,connection_digest,"+
@@ -104,8 +84,8 @@ export class PgConnectorSessions{
 
   async issue(owner:string,deviceId:string):Promise<Issue>{
     if(!validOwner(owner)||!ID.test(deviceId))return {kind:"unavailable"};
-    return this.transact<Issue>(async db=>{
-      if(!await this.key(db,owner,deviceId))return {kind:"unavailable"};
+    return withDeviceTransaction<Issue>(this.pool,async db=>{
+      if(!await lockActiveDeviceKey(db,owner,deviceId))return {kind:"unavailable"};
       // Expire prior pending handshakes and sessions in the device lock.
       await db.query(
         "UPDATE device_handshake_challenges SET status='expired' "+
@@ -152,8 +132,8 @@ export class PgConnectorSessions{
   ):Promise<Activation>{
     if(!validOwner(owner)||!ID.test(deviceId)||!ID.test(sessionId))
       return {kind:"unavailable"};
-    return this.transact<Activation>(async db=>{
-      const keyDer=await this.key(db,owner,deviceId);
+    return withDeviceTransaction<Activation>(this.pool,async db=>{
+      const keyDer=await lockActiveDeviceKey(db,owner,deviceId);
       if(!keyDer)return {kind:"unavailable"};
       const session=await this.row(db,owner,deviceId,sessionId);
       if(!session||session.state!=="pending")return {kind:"unavailable"};
@@ -198,8 +178,8 @@ export class PgConnectorSessions{
        !Number.isSafeInteger(sequence)||sequence<1||
        !Buffer.isBuffer(bytes)||bytes.length===0||bytes.length>MAX_MESSAGE)
       return {kind:"unavailable"};
-    return this.transact<EventVerification>(async db=>{
-      const keyDer=await this.key(db,owner,deviceId);
+    return withDeviceTransaction<EventVerification>(this.pool,async db=>{
+      const keyDer=await lockActiveDeviceKey(db,owner,deviceId);
       if(!keyDer)return {kind:"unavailable"};
       const session=await this.row(db,owner,deviceId,sessionId);
       if(!session||session.state!=="active")return {kind:"unavailable"};
@@ -222,8 +202,8 @@ export class PgConnectorSessions{
   /** In-process disconnect hook; never grant access based on binding alone. */
   async close(owner:string,deviceId:string,sessionId:string,binding:string):Promise<boolean>{
     if(!validOwner(owner)||!ID.test(deviceId)||!ID.test(sessionId))return false;
-    return this.transact<boolean>(async db=>{
-      if(!await this.key(db,owner,deviceId))return false;
+    return withDeviceTransaction<boolean>(this.pool,async db=>{
+      if(!await lockActiveDeviceKey(db,owner,deviceId))return false;
       const session=await this.row(db,owner,deviceId,sessionId);
       if(!session||!["pending","active"].includes(session.state)||
          !equalDigest(binding,session.connection_digest))return false;
