@@ -112,3 +112,13 @@ No overall DoD is considered met by the above partial implementation.
 - [x] Concurrent request-local error isolation, other failures stay HTTP 500
 - [ ] Real social-provider authorization-code exchange and fresh account consent
 - [ ] ChatGPT/Claude end-to-end reauthorization UX, followed by other hosts
+
+## OAuth 2.1/PKCE local protocol acceptance
+- [x] Real Better Auth authorize to signed login redirect
+- [x] Google/GitHub login initiation preserves signed client request
+- [x] Authenticated consent, code exchange and MCP-bound access token
+- [x] Reused code and mismatched fresh-code PKCE verifier rejected
+- [ ] Google/GitHub live callback in private staging
+- [ ] ChatGPT/Claude live MCP pairing, refresh and reconnect
+- [ ] Gemini/Grok compatibility based on verified host capabilities
+- [ ] Local connector and real project authorization
