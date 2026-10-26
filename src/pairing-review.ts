@@ -2,6 +2,14 @@ import {createHmac} from "node:crypto";
 import type {Pool} from "pg";
 import {PgPairingChallenges,type BrowserReview} from "./pairing-store.js";
 
+/** Domain-separated shared pairing code key for browser and device APIs. */
+export function pairingServerKey(authSecret:string):Buffer{
+  if(typeof authSecret!=="string"||authSecret.length<32)
+    throw new Error("PAIRING_REVIEW_SECRET_TOO_SHORT");
+  return createHmac("sha256",authSecret)
+    .update("kicad-cloud-pairing-user-code-v1").digest();
+}
+
 export type BrowserPairingReview=BrowserReview|"throttled";
 export type PairingReviewPort=Pick<PgPairingReview,"review">;
 
@@ -13,12 +21,7 @@ export type PairingReviewPort=Pick<PgPairingReview,"review">;
 export class PgPairingReview {
   private readonly store:PgPairingChallenges;
   constructor(private readonly pool:Pool,authSecret:string){
-    if(typeof authSecret!=="string"||authSecret.length<32)
-      throw new Error("PAIRING_REVIEW_SECRET_TOO_SHORT");
-    // Stable, domain-separated key; existing auth secret is never saved to PG.
-    const key=createHmac("sha256",authSecret)
-      .update("kicad-cloud-pairing-user-code-v1").digest();
-    this.store=new PgPairingChallenges(pool,key);
+    this.store=new PgPairingChallenges(pool,pairingServerKey(authSecret));
   }
   async review(id:string,owner:string,code:string,decision:"approve"|"deny"):
     Promise<BrowserPairingReview>{
