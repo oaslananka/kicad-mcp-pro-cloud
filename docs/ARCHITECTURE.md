@@ -122,3 +122,11 @@ consent revocation UI have yet been proven. Auth remains disabled by default.
 Revoking an OAuth consent does not by itself immediately invalidate an
 already-issued bearer token: project-client grants also need revocation to
 prevent continued authorized project discovery or execution.
+
+### Safe consent page rendering
+
+The consent form uses React 19 server-side rendering with no client-side
+JavaScript. OAuth client names, scopes, claims and signed form values are
+passed as text/attribute values so framework escaping is applied before
+HTML serialization. CSP denies script execution and third-party resources.
+This adds no new frontend service or single-page application.

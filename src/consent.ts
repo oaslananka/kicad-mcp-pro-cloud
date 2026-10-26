@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { makeSignature } from "better-auth/crypto";
-import escapeHtml from "escape-html";
+import { renderConsentPage, type ConsentView } from "./consent-ui.js";
 import { verifyOAuthQueryParams } from "@better-auth/oauth-provider";
 import type { BrowserIdentity } from "./browser.js";
 
@@ -12,14 +12,13 @@ const HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Content-Security-Policy": "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"
 };
-function renderHtmlPage(safeContentHtml:string, status=200, cookie?:string):Response {
-  const pageHtml='<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>KiCad MCP Pro Authorization</title><main><h1>KiCad MCP Pro Authorization</h1>'+safeContentHtml+'</main></html>';
+function renderConsentResponse(view:ConsentView, status=200, cookie?:string):Response {
   const headers=new Headers(HEADERS);
   if(cookie) headers.append("Set-Cookie",cookie);
-  return new Response(pageHtml,{status,headers});
+  return new Response(renderConsentPage(view),{status,headers});
 }
 function error(status=400):Response {
-  return renderHtmlPage("<p>Authorization request could not be verified. Restart the connection in your AI client.</p>",status);
+  return renderConsentResponse({kind:"notice",message:"Authorization request could not be verified. Restart the connection in your AI client."},status);
 }
 function queryValid(query:string):boolean {
   const params=new URLSearchParams(query);
@@ -111,18 +110,11 @@ async function consentGet(request:Request,identity:BrowserIdentity,origin:string
   const now=Date.now();
   const nonce=randomBytes(16).toString("base64url");
   const token=[now,nonce,await consentSignature(secret,session.user.id,query,nonce,now)].join(".");
-  const scope=(params.get("scope")??"").split(/\s+/).filter(Boolean);
+  const scopes=(params.get("scope")??"").split(/\s+/).filter(Boolean);
   const claims=params.get("claims");
-  const claimsHtml=claims ? "<p>Additional claims requested: "+escapeHtml(claims)+"</p>" : "";
-  const requestedScopeHtml=escapeHtml(scope.join(", "));
-  const contentHtml="<p>"+escapeHtml(name)+" requests access to your account.</p>"+
-    "<p>Requested permissions: "+requestedScopeHtml+"</p>"+claimsHtml+
-    "<p>This does not automatically authorize access to any KiCad project. Project grants are separate.</p>"+
-    '<form action="/consent" method="post"><input type="hidden" name="oauth_query" value="'+escapeHtml(query)+'">'+
-    '<input type="hidden" name="csrf" value="'+escapeHtml(token)+'">'+
-    '<button name="decision" value="deny" type="submit">Deny</button>'+
-    '<button name="decision" value="approve" type="submit">Approve</button></form>';
-  return renderHtmlPage(contentHtml,200,csrfCookie(token,origin,300));
+  return renderConsentResponse({
+    kind:"approve",clientName:name,scopes,claims:claims??undefined,query,csrf:token
+  },200,csrfCookie(token,origin,300));
 }
 async function consentPost(request:Request,identity:BrowserIdentity,origin:string,managementClientId:string):Promise<Response> {
   if(request.headers.get("origin")!==origin) return error(403);
