@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { createIdentity } from "../src/identity.js";
 import pg from "pg";
 import { getMigrations } from "better-auth/db/migration";
+import { browserResponse } from "../src/browser.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 function instance(pool?: pg.Pool) {
@@ -53,6 +54,14 @@ test("Better Auth serves MCP-aware OAuth metadata with PostgreSQL", {skip: !data
       }
     }
     assert.equal(served,true,"issuer-specific authorization metadata must be served");
+    const form=await browserResponse(new Request("http://127.0.0.1:8787/auth/start/google",{
+      method:"POST",
+      headers:{"Origin":"http://127.0.0.1:8787","Content-Type":"application/x-www-form-urlencoded"},
+      body:"oauth_query="
+    }),identity,"http://127.0.0.1:8787");
+    assert.equal(form?.status,303,await form?.text());
+    assert.equal(new URL(form!.headers.get("location")!).hostname,"accounts.google.com");
+    assert.match(form?.headers.get("set-cookie")??"",/HttpOnly/i);
   } finally {
     await pool.end();
   }

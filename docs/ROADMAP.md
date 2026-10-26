@@ -50,3 +50,13 @@ No overall DoD is considered met by the above partial implementation.
 - [ ] DPoP-aware resource verification for bound tokens (currently denied)
 - [ ] Select/provision secure production runtime, perform DB restore, rollout
       and rollback acceptance (not done)
+
+## Browser login increment
+- [x] Server-rendered Google/GitHub login with provider redirect restrictions,
+      same-origin POST and signed OAuth query verification
+- [x] Authenticated account landing page with no-session redirect
+- [x] Unit and ephemeral PostgreSQL-backed authorization initiation tests
+- [ ] Verified client-specific consent page and grant/revoke flow
+- [ ] Real provider registration and social callback acceptance
+- [ ] ChatGPT/Claude real OAuth interoperability, session rotation
+- [ ] Device pairing, project dashboard, local KiCad connector and production deploy
