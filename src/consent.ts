@@ -35,7 +35,7 @@ async function verifyQuery(identity:BrowserIdentity, query:string):Promise<boole
   const {secret}=await identity.$context;
   return verifyOAuthQueryParams(query,secret);
 }
-async function sessionFor(identity:BrowserIdentity, request:Request) {
+function sessionFor(identity:BrowserIdentity, request:Request) {
   return identity.api?.getSession({headers:request.headers});
 }
 async function approvedClient(identity:BrowserIdentity,request:Request,origin:string,clientId:string):Promise<string|null> {
