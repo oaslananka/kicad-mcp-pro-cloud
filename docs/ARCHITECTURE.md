@@ -130,3 +130,29 @@ JavaScript. OAuth client names, scopes, claims and signed form values are
 passed as text/attribute values so framework escaping is applied before
 HTML serialization. CSP denies script execution and third-party resources.
 This adds no new frontend service or single-page application.
+
+## Per-user connection revocation (Issue #2 incremental)
+
+An authenticated account can list OAuth consents on /connections, using
+Better Auth's getOAuthConsents with the active session. For POST
+/connections/revoke, the server checks session identity, exact Origin, the
+consent's owner and client, and a short-lived, same-site, user/session/client/
+consent-bound CSRF signature. Server-side HTML rendering escapes client
+metadata. No OAuth bearer token or KiCad local path appears in HTML.
+
+Revocation is deliberately fail-closed and ordered:
+1. In PostgreSQL, disable ALL project grants for that authenticated owner
+   and OAuth client, recording only metadata audit entries.
+2. Only after that transaction commits, call Better Auth deleteOAuthConsent
+   using the user's session. On a failed deletion, report an error and keep
+   project grants disabled.
+
+Already issued stateless JWT access tokens cannot be individually revoked
+by deleting OAuth consent. The Cloud's read tools must continue checking the
+live grant rows on every invocation; this ensures previously signed JWTs
+cannot discover projects after grant revocation. Future remote execution
+must enforce identical current grants and permissions, not just token scope.
+
+This design does not claim refresh-token family revocation, a token denylist,
+device disconnection, or realtime remote execution cancellation. Those need
+separate acceptance tests before public production launch.

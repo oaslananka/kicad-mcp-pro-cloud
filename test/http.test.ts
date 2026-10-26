@@ -25,6 +25,10 @@ const inventory: Inventory = {
 };
 const managementCalls: unknown[] = [];
 const grants: GrantManagement = {
+  async revokeClient(owner,client) {
+    managementCalls.push({owner,client,action:"revoke"});
+    return owner==="user-a" ? 1 : 0;
+  },
   async setGrant(owner, client, project, policy) {
     managementCalls.push({owner,client,project,policy});
     if (owner !== "user-a") return false;
@@ -188,6 +192,30 @@ test("HTTP consent rejects forged unsigned request even if identity is configure
     assert.equal(response.status,403);
     assert.doesNotMatch(await response.text(),/Approve<\/button>/);
   }finally{
+    await new Promise<void>(resolve=>proxy.close(()=>resolve()));
+  }
+});
+
+test("connection management is fail-closed without built-in identity",async()=>{
+  assert.equal((await fetch(endpoint+"/connections")).status,404);
+  const response=await fetch(endpoint+"/connections/revoke",{method:"POST",headers:{"Origin":config.publicOrigin,
+    "Content-Type":"application/x-www-form-urlencoded"},body:"id=anything"});
+  assert.equal(response.status,404);
+});
+test("HTTP connection list requires signed-in session",async()=>{
+  const mockIdentity={
+    handler:async()=>Response.json({client_id:"test"}),
+    api:{getSession:async()=>null},
+    $context:Promise.resolve({secret:"test-only-not-a-production-secret"})
+  };
+  const proxy=createHttpServer(config,inventory,verify,grants,mockIdentity as never);
+  await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
+  try {
+    const port=(proxy.address() as AddressInfo).port;
+    const res=await fetch("http://127.0.0.1:"+port+"/connections",{redirect:"manual"});
+    assert.equal(res.status,303);
+    assert.equal(res.headers.get("location"),"/sign-in");
+  } finally {
     await new Promise<void>(resolve=>proxy.close(()=>resolve()));
   }
 });

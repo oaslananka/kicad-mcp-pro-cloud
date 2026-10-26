@@ -10,9 +10,33 @@ export type GrantInput = {
 
 export interface GrantManagement {
   setGrant(ownerSub: string, actorClientId: string, projectId: string, grant: GrantInput): Promise<boolean>;
+  revokeClient(ownerSub: string, clientId: string): Promise<number>;
 }
 
 export class PgGrantManagement extends PgInventory implements GrantManagement {
+  async revokeClient(ownerSub: string, clientId: string): Promise<number> {
+    const db = await this.pool.connect();
+    try {
+      await db.query("BEGIN");
+      const result = await db.query<{project_id:string}>(
+        "UPDATE project_client_grants SET enabled=false WHERE owner_sub=$1 AND client_id=$2 AND enabled=true RETURNING project_id",
+        [ownerSub,clientId]
+      );
+      for (const {project_id} of result.rows) {
+        await db.query(
+          "INSERT INTO client_grant_audit(owner_sub,actor_client_id,project_id,operation) VALUES($1,$2,$3,'client.revoke')",
+          [ownerSub,clientId,project_id]
+        );
+      }
+      await db.query("COMMIT");
+      return result.rowCount ?? 0;
+    } catch(e) {
+      await db.query("ROLLBACK");
+      throw e;
+    } finally {
+      db.release();
+    }
+  }
   async setGrant(ownerSub: string, actorClientId: string, projectId: string, grant: GrantInput): Promise<boolean> {
     const db: PoolClient = await this.pool.connect();
     try {

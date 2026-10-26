@@ -69,3 +69,13 @@ No overall DoD is considered met by the above partial implementation.
 - [ ] Real provider authorisation end-to-end and client-specific consent acceptance
 - [ ] UI to review/revoke consents and disable client project grants together;
       check existing access-token validity separately
+
+## Client connection revocation
+- [x] Session-required listing of OAuth consents
+- [x] Owner-bound, CSRF-protected revoke action with verified client ID
+- [x] Transactionally disable all matching project-client grants before
+      deleting consent, with metadata-only audit
+- [x] Unit, HTTP and PostgreSQL grant revocation tests
+- [ ] Revoke outstanding refresh token families / define hard JWT cutoff
+- [ ] End-to-end browser login, OAuth callbacks and host token refresh tests
+- [ ] Device/local-connector permission enforcement, real client acceptance
