@@ -100,7 +100,9 @@ async function accountPage(request:Request,identity:BrowserIdentity):Promise<Res
 export async function browserResponse(request:Request,identity:BrowserIdentity,publicOrigin:string):Promise<Response|null> {
   const url=new URL(request.url);
   if(url.pathname==="/sign-in" && request.method==="GET") return signInPage(url,identity);
-  const provider=url.pathname==="/auth/start/google"?"google":url.pathname==="/auth/start/github"?"github":null;
+  let provider: "google" | "github" | null = null;
+  if (url.pathname === "/auth/start/google") provider = "google";
+  else if (url.pathname === "/auth/start/github") provider = "github";
   if(provider && request.method==="POST") {
     return startSocialLogin(request,identity,publicOrigin,provider);
   }
