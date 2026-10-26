@@ -68,3 +68,12 @@ separate acceptance work.
 
 No Cloud production migration 012, OAuth provider setup, WebSocket activation,
 deploy or cross-repository modification occurs with this PR.
+
+
+### Trusted origin source gate
+
+When enabled, the pairing API additionally requires the exact trusted
+Cloudflare Tunnel peer allowlist `TRUSTED_CLOUDFLARED_PEERS`, and a unique
+valid `CF-Connecting-IP` header from that known TCP peer. No origin
+headers are accepted from other peers; arbitrary X-Forwarded-For claims
+are ignored. See [trusted ingress source](TRUSTED-INGRESS-SOURCE.md).

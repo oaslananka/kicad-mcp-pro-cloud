@@ -77,3 +77,9 @@ Disposable PostgreSQL/WebSocket tests exercise the authentic two-key-proof
 handshake and denial of unauthorized messages; they do **not** constitute
 production or real KiCad acceptance. No new migration or cloud infrastructure
 resource is introduced.
+
+
+The WebSocket upgrade now also requires a verified ingress TCP peer and
+single `CF-Connecting-IP` header; both use the same fail-closed source
+resolver as device enrollment. See
+[trusted ingress source](TRUSTED-INGRESS-SOURCE.md).

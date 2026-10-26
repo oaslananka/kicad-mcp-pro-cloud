@@ -4,6 +4,7 @@ import {WebSocket,WebSocketServer} from "ws";
 import {z} from "zod";
 import {BoundConnectorConnections} from "./connector-transport-binding.js";
 import type {PgDeviceHandshakes} from "./device-handshake.js";
+import type {RequestSourceResolver} from "./trusted-ingress.js";
 
 export type DeviceProofPort=Pick<PgDeviceHandshakes,"issue"|"verify"|"cancel">;
 type State="new"|"device_challenge"|"session_challenge"|"ready"|"closed";
@@ -63,6 +64,7 @@ export function attachConnectorWebSocket(
     proofs:DeviceProofPort;
     connections:BoundConnectorConnections;
     maxConnections?:number;
+    sourceOf:RequestSourceResolver;
   }
 ):{close:()=>Promise<void>}{
   const wss=new WebSocketServer({noServer:true,perMessageDeflate:false,
@@ -90,8 +92,8 @@ export function attachConnectorWebSocket(
     else ws.terminate();
   }
   const upgrade=(req:IncomingMessage,socket:Socket,head:Buffer):void=>{
-    const ip=req.socket.remoteAddress??"unknown";
-    if(stopped||!isAllowedUpgrade(req,options.publicOrigin)){
+    const ip=options.sourceOf(req);
+    if(stopped||!ip||!isAllowedUpgrade(req,options.publicOrigin)){
       denyUpgrade(socket);return;
     }
     if(sockets.size>=(options.maxConnections??MAX_SOCKETS)||

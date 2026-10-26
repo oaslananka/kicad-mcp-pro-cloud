@@ -59,7 +59,7 @@ test("strict device-only HTTP denies browser, spoofed identity and oversized tra
     }
   };
   const server=createHttpServer(config,inventory,async()=>{throw Error("not called");},
-    undefined,undefined,undefined,undefined,api);
+    undefined,undefined,undefined,undefined,api,req=>req.socket.remoteAddress??null);
   const l=await listener(server),issue=l.origin+"/api/v1/pairing/device/challenge";
   const good=JSON.stringify({alias:"KiCad Test",publicKeyDer:key.toString("base64")});
   try{
@@ -115,7 +115,7 @@ test("redemption rejects incorrect signature and code encoding before store",asy
     enroll:async()=>{called=true;return {kind:"unavailable"};}
   };
   const server=createHttpServer(config,inventory,async()=>{throw Error("not called");},
-    undefined,undefined,undefined,undefined,api);
+    undefined,undefined,undefined,undefined,api,req=>req.socket.remoteAddress??null);
   const l=await listener(server);
   try{
     const base=l.origin+"/api/v1/pairing/device/redeem";

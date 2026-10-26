@@ -1,6 +1,7 @@
 import type {IncomingMessage,ServerResponse} from "node:http";
 import {z} from "zod";
 import type {PairingDevicePort} from "./pairing-device-api.js";
+import type {RequestSourceResolver} from "./trusted-ingress.js";
 
 const issueSchema=z.strictObject({
   alias:z.string().min(1).max(64),
@@ -44,7 +45,8 @@ async function jsonBody(req:IncomingMessage):Promise<unknown>{
  * No browser, bearer tokens, proxy-asserted IPs, local files or tool calls.
  */
 export async function handlePairingDeviceRequest(
-  req:IncomingMessage,res:ServerResponse,api:PairingDevicePort
+  req:IncomingMessage,res:ServerResponse,api:PairingDevicePort,
+  sourceOf:RequestSourceResolver
 ):Promise<boolean>{
   const path=(req.url??"").split("?")[0];
   if(path!=="/api/v1/pairing/device/challenge"&&
@@ -59,10 +61,10 @@ export async function handlePairingDeviceRequest(
   if(typeof ct!=="string"||ct!=="application/json"){
     reply(res,415,{error:"unsupported_media_type"});return true;
   }
-  // Intentionally ignore X-Forwarded-For and client-claimed source identity.
-  // Trusted ingress must provide a separate distributed edge rate limit.
-  const source=req.socket.remoteAddress;
-  if(!source){reply(res,503,{error:"unavailable"});return true;}
+  // Require a verified Cloudflare Tunnel peer, never X-Forwarded-For
+  // or an unverified, shared proxy TCP source address.
+  const source=sourceOf(req);
+  if(!source){reply(res,403,{error:"untrusted_ingress"});return true;}
   let parsed:unknown;
   try{parsed=await jsonBody(req);}
   catch(error){
