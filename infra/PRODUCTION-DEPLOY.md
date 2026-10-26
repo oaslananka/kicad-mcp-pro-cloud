@@ -9,8 +9,8 @@ joins that network plus the preexisting ops_internal Cloudflare tunnel
 network. Other services and domains are untouched.
 
 All persistent secrets are in Doppler project kicad-mcp-pro / config prd_cloud.
-Required variables: KICAD_DB_PASSWORD, DATABASE_URL, PUBLIC_ORIGIN,
-OAUTH_ISSUER, OAUTH_JWKS_URL and OAUTH_AUDIENCE.
+Required variables: KICAD_DB_PASSWORD, PUBLIC_ORIGIN,
+OAUTH_ISSUER, OAUTH_JWKS_URL and OAUTH_AUDIENCE. DATABASE_URL contains no credentials; pg uses PGPASSWORD from the Doppler password.
 GitHub Secrets must contain only DOPPLER_TOKEN.
 
 This release explicitly fixes AUTH_MODE=external. Actual Google/GitHub login

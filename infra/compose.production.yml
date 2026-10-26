@@ -29,7 +29,8 @@ services:
       OAUTH_ISSUER: ${OAUTH_ISSUER:?Required Doppler value}
       OAUTH_JWKS_URL: ${OAUTH_JWKS_URL:?Required Doppler value}
       OAUTH_AUDIENCE: ${OAUTH_AUDIENCE:?Required Doppler value}
-      DATABASE_URL: ${DATABASE_URL:?Required Doppler value}
+      DATABASE_URL: postgresql://kicad_cloud@db:5432/kicad_cloud
+      PGPASSWORD: ${KICAD_DB_PASSWORD:?Required Doppler value}
       AUTH_MODE: external
       HOST: 0.0.0.0
       PORT: "8787"
