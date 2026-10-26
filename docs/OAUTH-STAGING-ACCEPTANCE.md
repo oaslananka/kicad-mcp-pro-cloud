@@ -55,3 +55,11 @@ https://better-auth.com/docs/plugins/oauth-provider
 https://better-auth.com/docs/plugins/mcp
 https://better-auth.com/docs/authentication/google
 https://better-auth.com/docs/authentication/github
+
+## CI-only recovery gate
+
+A reproducible isolated two-container PostgreSQL 17 backup/restore drill now
+checks that all six migrations, synthetic project permissions, cutoff state
+and actual token issuance protection survive recovery. It is not evidence
+that production or staging backups, retention, encryption and rollback are
+configured; those remain open deployment acceptance gates.

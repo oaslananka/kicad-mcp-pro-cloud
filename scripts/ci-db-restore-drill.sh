@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# Disposable PostgreSQL 17 backup/restore acceptance, never a production tool.
+set -euo pipefail
+
+if [[ $# -ne 1 || -z "$1" ]]; then
+  echo 'Usage: ci-db-restore-drill.sh <already-built-test-image>' >&2
+  exit 2
+fi
+if ! command -v docker >/dev/null 2>&1; then
+  echo 'Docker is required for the isolated restore drill' >&2
+  exit 2
+fi
+image=$1
+docker image inspect "$image" >/dev/null
+suffix="$(openssl rand -hex 7)"
+network="kicad-drill-$suffix"
+source="kicad-drill-source-$suffix"
+target="kicad-drill-target-$suffix"
+cleanup() {
+  docker rm -f "$source" "$target" >/dev/null 2>&1 || true
+  docker network rm "$network" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+docker network create --internal "$network" >/dev/null
+for name in "$source" "$target"; do
+  # Fixture-only credentials: no Doppler data and no published host ports.
+  docker run --rm -d --name "$name" --network "$network" \
+    --network-alias "$name" \
+    -e POSTGRES_USER=fixture -e POSTGRES_PASSWORD=fixture-only \
+    -e POSTGRES_DB=cloud_fixture postgres:17-alpine >/dev/null
+  for attempt in $(seq 1 35); do
+    if docker exec "$name" pg_isready -q -U fixture -d cloud_fixture; then break; fi
+    sleep 1
+  done
+  docker exec "$name" pg_isready -q -U fixture -d cloud_fixture
+done
+
+cli() {
+  local database_host=$1 action=$2
+  docker run --rm --network "$network" \
+    -e "DATABASE_URL=postgresql://fixture:fixture-only@$database_host:5432/cloud_fixture" \
+    "$image" node dist/migrations-cli.js "$action"
+}
+sql() {
+  local database_host=$1 query=$2
+  docker exec "$database_host" psql -X -v ON_ERROR_STOP=1 -q -t -A \
+    -U fixture -d cloud_fixture -c "$query"
+}
+assert_eq() {
+  local actual=$1 expected=$2 description=$3
+  if [[ "$actual" != "$expected" ]]; then
+    printf 'Restore drill FAILED: %s (expected %s, got %s)\n' \
+      "$description" "$expected" "$actual" >&2
+    exit 1
+  fi
+}
+echo 'Restore drill: applying reviewed database schema in source fixture'
+cli "$source" --status >/dev/null
+cli "$source" --apply >/dev/null
+assert_eq "$(sql "$source" 'SELECT count(*) FROM schema_migrations')" "6" "source migration count"
+
+# Only synthetic metadata; no physical KiCad paths, files or user credentials.
+sql "$source" "INSERT INTO devices(id,owner_sub,alias,enabled) VALUES
+  ('c3e0d32d-d8bf-49c8-ae15-f2acc4c147b7','fixture-owner','Fixture Device',true)" >/dev/null
+sql "$source" "INSERT INTO projects(id,owner_sub,device_id,alias,enabled)
+  VALUES('a39a9f88-d390-4431-8cd4-2c4430aad321','fixture-owner',
+  'c3e0d32d-d8bf-49c8-ae15-f2acc4c147b7','Fixture Project',true)" >/dev/null
+sql "$source" "INSERT INTO project_client_grants(project_id,owner_sub,client_id,enabled,max_mode)
+  VALUES('a39a9f88-d390-4431-8cd4-2c4430aad321','fixture-owner','fixture-client',true,'readonly')" >/dev/null
+sql "$source" "INSERT INTO client_token_cutoffs(owner_sub,client_id,revoked_at)
+  VALUES('fixture-owner','fixture-client','2026-10-01T00:00:00Z')" >/dev/null
+sql "$source" "INSERT INTO \"users\"(\"id\",\"name\",\"email\",\"emailVerified\",\"createdAt\",\"updatedAt\")
+  VALUES('fixture-owner','Test Owner','synthetic@example.invalid',true,now(),now())" >/dev/null
+sql "$source" "INSERT INTO \"oauthClient\"(\"id\",\"clientId\",\"redirectUris\")
+  VALUES('fixture-client-row','fixture-client','[]'::jsonb)" >/dev/null
+
+echo 'Restore drill: streaming PostgreSQL custom backup to fresh target'
+docker exec "$source" pg_dump -Fc -U fixture -d cloud_fixture \
+  --no-owner --no-acl |
+  docker exec -i "$target" pg_restore -U fixture -d cloud_fixture \
+    --no-owner --no-acl --exit-on-error
+
+echo 'Restore drill: checking migrations, permissions and authorization fences'
+cli "$target" --status >/dev/null
+cli "$target" --apply >/dev/null
+assert_eq "$(sql "$target" 'SELECT count(*) FROM schema_migrations')" "6" "restored migration ledger"
+assert_eq "$(sql "$target" "SELECT count(*) FROM devices WHERE owner_sub='fixture-owner'")" "1" "device metadata"
+assert_eq "$(sql "$target" "SELECT count(*) FROM projects WHERE owner_sub='fixture-owner'")" "1" "project metadata"
+assert_eq "$(sql "$target" "SELECT count(*) FROM project_client_grants WHERE owner_sub='fixture-owner' AND client_id='fixture-client' AND enabled")" "1" "client grant metadata"
+assert_eq "$(sql "$target" "SELECT kicad_oauth_lineage_blocked('fixture-owner','fixture-client','old-code')")" "t" "token issuance cutoff"
+assert_eq "$(sql "$target" "SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal AND tgname IN ('kicad_fence_refresh_insert','kicad_fence_opaque_access_insert','kicad_fence_refresh_replay')")" "3" "restored OAuth triggers"
+# Verify actual trigger rejection, not merely function/table presence. This
+# synthetic token INSERT MUST raise SQLSTATE 23514 due to restored cutoff.
+sql "$target" "DO \$do\$
+BEGIN
+  INSERT INTO \"oauthRefreshToken\"(\"id\",\"token\",\"clientId\",\"userId\",\"scopes\",\"createdAt\",\"expiresAt\",\"authorizationCodeId\")
+  VALUES('denied-token','denied-token-hash','fixture-client','fixture-owner',
+    '[]'::jsonb,now(),now() + interval '1 hour','old-code');
+  RAISE EXCEPTION 'late token was incorrectly accepted';
+EXCEPTION WHEN SQLSTATE '23514' THEN NULL;
+END \$do\$" >/dev/null
+assert_eq "$(sql "$target" 'SELECT count(*) FROM "oauthRefreshToken"')" "0" "rejected token was not inserted"
+source_ledger="$(sql "$source" "SELECT md5(string_agg(version || ':' || checksum, '|' ORDER BY version)) FROM schema_migrations")"
+target_ledger="$(sql "$target" "SELECT md5(string_agg(version || ':' || checksum, '|' ORDER BY version)) FROM schema_migrations")"
+assert_eq "$target_ledger" "$source_ledger" "restored checksum ledger"
+echo 'Restore drill passed: all six migrations, metadata, cutoff policy and triggers recovered'

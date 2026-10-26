@@ -33,3 +33,5 @@ jobs:
       - run: npm run check
       - name: Build secret-free OCI image
         run: docker build -t kicad-mcp-pro-cloud:ci .
+      - name: Prove ephemeral PostgreSQL backup and restore
+        run: bash scripts/ci-db-restore-drill.sh kicad-mcp-pro-cloud:ci
