@@ -52,7 +52,7 @@ test("account page requires session; escaped account display has no HTML injecti
   const response=await browserResponse(new Request(origin+"/account"),user,origin);
   assert.equal(response?.status,200);
   const text=await response!.text();
-  assert.doesNotMatch(text,/<script>/);
+  assert.equal(text.toLowerCase().includes("<script"),false);
   assert.match(text,/&lt;script&gt;/);
   assert.match(response?.headers.get("content-security-policy")??"",/default-src 'none'/);
 });
