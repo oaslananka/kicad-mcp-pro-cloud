@@ -5,13 +5,6 @@ import type {GrantManagement} from "./grants.js";
 import {renderConnectionsPage, type DisplayConnection} from "./connections-ui.js";
 
 const FIVE_MINUTES=300_000;
-const htmlHeaders={
-  "Content-Type":"text/html; charset=utf-8",
-  "Cache-Control":"no-store",
-  "Referrer-Policy":"no-referrer",
-  "X-Content-Type-Options":"nosniff",
-  "Content-Security-Policy":"default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"
-};
 function cookieName(origin:string):string {
   return origin.startsWith("https://") ? "__Host-kicad-connections" : "kicad-connections";
 }
@@ -26,7 +19,12 @@ function readCookie(request:Request,origin:string):string|null {
 }
 function page(connections:DisplayConnection[],status=200,extraCookie?:string,notice?:string):Response {
   const response = new Response(renderConnectionsPage(connections,notice),{status});
-  for(const [name,value] of Object.entries(htmlHeaders)) response.headers.set(name,value);
+  response.headers.set("Content-Type","text/html; charset=utf-8");
+  response.headers.set("Cache-Control","no-store");
+  response.headers.set("Referrer-Policy","no-referrer");
+  response.headers.set("X-Content-Type-Options","nosniff");
+  response.headers.set("Content-Security-Policy",
+    "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
   if(extraCookie) response.headers.append("Set-Cookie",extraCookie);
   return response;
 }
