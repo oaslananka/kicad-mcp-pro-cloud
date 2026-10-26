@@ -46,7 +46,7 @@ remain necessary even though no app rollback image is retained.
 The following checks create neither staging nor a second application image.
 
 After a release, execute:
-    node scripts/production-smoke.mjs https://kicad-mcp-pro.oaslananka.dev
+    node scripts/production-smoke.mjs
 
 The script verifies HTTPS, the premium page and CSS, honest connector status,
 OAuth resource metadata, anonymous MCP denial and disabled signup.

@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 
-const origin=process.argv[2]??process.env.PUBLIC_ORIGIN;
-if(!origin) throw new Error("Pass production HTTPS origin explicitly");
-const root=new URL(origin);
-assert.equal(root.protocol,"https:","Only HTTPS production endpoints may be tested");
-assert.equal(root.pathname,"/","Production origin must not contain a path");
+// This acceptance probe has one fixed, allowlisted public destination.
+const root=new URL("https://kicad-mcp-pro.oaslananka.dev/");
 const request=async (path,options={})=>{
   const response=await fetch(new URL(path,root),{
     redirect:"manual",
@@ -13,11 +10,11 @@ const request=async (path,options={})=>{
   });
   return response;
 };
-const html=await request("/");
-assert.equal(html.status,200,"Premium overview must be public");
-assert.match(html.headers.get("content-type")??"",/text\/html/);
-assert.match(html.headers.get("content-security-policy")??"",/style-src 'self'/);
-const page=await html.text();
+const landingResponse=await request("/");
+assert.equal(landingResponse.status,200,"Premium overview must be public");
+assert.match(landingResponse.headers.get("content-type")??"",/text\/html/);
+assert.match(landingResponse.headers.get("content-security-policy")??"",/style-src 'self'/);
+const page=await landingResponse.text();
 assert.match(page,/Engineering, connected\./);
 assert.match(page,/Account access pending/);
 assert.doesNotMatch(page,/<script[\s>]/i);
