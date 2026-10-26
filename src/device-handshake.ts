@@ -75,6 +75,22 @@ export class PgDeviceHandshakes{
   }
 
   /**
+   * Server-only cancellation of an unclaimed challenge following transport
+   * disconnection. Retains device lock order shared with revocation.
+   */
+  async cancel(owner:string,deviceId:string,challengeId:string):Promise<boolean>{
+    if(!validOwner(owner)||!UUID.test(deviceId)||!UUID.test(challengeId))return false;
+    return withDeviceTransaction<boolean>(this.pool,async db=>{
+      if(!await lockActiveDeviceKey(db,owner,deviceId))return false;
+      const result=await db.query(
+        "UPDATE device_handshake_challenges SET status='revoked' "+
+        "WHERE id=$1 AND device_id=$2 AND owner_sub=$3 AND status='pending'",
+        [challengeId,deviceId,owner]);
+      return result.rowCount===1;
+    });
+  }
+
+  /**
    * Successful result is only a one-use proof event. It does NOT create
    * a durable session, grant access to project data, or enable native tools.
    */

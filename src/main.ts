@@ -1,4 +1,10 @@
 import { loadConfig } from "./config.js";
+import {Pool} from "pg";
+import {PgDeviceHandshakes} from "./device-handshake.js";
+import {PgConnectorSessions} from "./connector-session.js";
+import {PgConnectorReadGate} from "./connector-read-gate.js";
+import {BoundConnectorConnections} from "./connector-transport-binding.js";
+import {attachConnectorWebSocket} from "./connector-ws.js";
 import { createVerifier } from "./auth.js";
 import { createHttpServer } from "./http.js";
 import { PgGrantManagement } from "./grants.js";
@@ -8,12 +14,32 @@ const config = loadConfig();
 const identity = configuredIdentity(config);
 const inventory = new PgGrantManagement(config.databaseUrl,Boolean(identity));
 const server = createHttpServer(config, inventory, createVerifier(config), inventory, identity);
+// Deliberately disabled until trusted WSS ingress, device onboarding and
+// real local connector acceptance have been verified.
+const wsEnabled=process.env.CONNECTOR_WS_ENABLED==="true";
+if(wsEnabled&&!config.publicOrigin.startsWith("https://")){
+  throw new Error("Connector WebSocket requires externally terminated HTTPS");
+}
+const connectorPool=wsEnabled?new Pool({connectionString:config.databaseUrl}):null;
+const connectorWs=connectorPool?attachConnectorWebSocket(server,{
+  publicOrigin:config.publicOrigin,
+  proofs:new PgDeviceHandshakes(connectorPool),
+  connections:new BoundConnectorConnections(
+    new PgConnectorSessions(connectorPool),
+    new PgConnectorReadGate(connectorPool))
+}):null;
 server.listen(config.port, config.host, () => {
   // Never log credential-bearing URLs, project data or request bodies.
   process.stdout.write("Cloud MCP server listening on configured interface\n");
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    server.close(() => { void inventory.close().finally(() => process.exit(0)); });
+    void (async()=>{
+      await connectorWs?.close();
+      await new Promise<void>(resolve=>server.close(()=>resolve()));
+      await connectorPool?.end();
+      await inventory.close();
+      process.exit(0);
+    })().catch(()=>process.exit(1));
   });
 }
