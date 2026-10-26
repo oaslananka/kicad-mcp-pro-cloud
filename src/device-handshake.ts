@@ -75,7 +75,7 @@ export class PgDeviceHandshakes{
 
   async issue(owner:string,deviceId:string):Promise<ChallengeIssue>{
     if(!validOwner(owner)||!UUID.test(deviceId))return {kind:"unavailable"};
-    return this.withDb(async db=>{
+    return this.withDb<ChallengeIssue>(async db=>{
       if(!await this.activeKey(db,owner,deviceId))return {kind:"unavailable"};
       await db.query(
         "UPDATE device_handshake_challenges SET status='expired' "+
@@ -109,7 +109,7 @@ export class PgDeviceHandshakes{
   ):Promise<ChallengeVerification>{
     if(!validOwner(owner)||!UUID.test(deviceId)||!UUID.test(challengeId))
       return {kind:"unavailable"};
-    return this.withDb(async db=>{
+    return this.withDb<ChallengeVerification>(async db=>{
       const keyDer=await this.activeKey(db,owner,deviceId);
       if(!keyDer)return {kind:"unavailable"};
       const result=await db.query<HandshakeRow>(
