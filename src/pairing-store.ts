@@ -1,3 +1,4 @@
+import {randomUUID} from "node:crypto";
 import type {Pool,PoolClient} from "pg";
 import {issuePairing,reviewPairing,redeemPairing,
   type PairingRecord,type PairingStatus} from "./device-pairing.js";
@@ -8,7 +9,7 @@ type Row={
   attempts:number;owner_sub:string|null;
 };
 export type BrowserReview="approved"|"denied"|"invalid_code"|"locked"|"unavailable";
-export type Redemption={kind:"redeemed";ownerSub:string;deviceFingerprint:string}|{kind:"unavailable"};
+export type Enrollment={kind:"enrolled";deviceId:string;ownerSub:string;deviceFingerprint:string}|{kind:"unavailable"};
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function convert(row:Row):PairingRecord {
@@ -89,13 +90,76 @@ export class PgPairingChallenges {
       return result.kind;
     });
   }
-  /** A verified binding only; caller MUST NOT treat it as a device credential. */
-  async redeem(id:string,code:string,signature:Buffer):Promise<Redemption>{
-    return this.locked(id,{kind:"unavailable"} as Redemption,async(db,r,now)=>{
-      const result=redeemPairing(r,this.key,now,code,signature);
-      if(result.record.state!==r.state)await save(db,result.record);
-      if(result.kind!=="redeemed")return {kind:"unavailable"};
-      return {kind:"redeemed",ownerSub:result.ownerSub,deviceFingerprint:r.deviceFingerprint};
+  /**
+   * Enroll only after browser approval and Ed25519 proof. One transaction
+   * inserts the disabled device and its revocable public-key identity AND
+   * consumes the challenge, so DB failure cannot burn the user's approval.
+   * There is deliberately no HTTP endpoint or device execution here.
+   */
+  async enroll(id:string,code:string,signature:Buffer):Promise<Enrollment>{
+    return this.locked(id,{kind:"unavailable"} as Enrollment,async(db,r,now)=>{
+      const proof=redeemPairing(r,this.key,now,code,signature);
+      if(proof.record.state!==r.state && proof.kind!=="redeemed"){
+        await save(db,proof.record);
+      }
+      if(proof.kind!=="redeemed")return {kind:"unavailable"};
+      const deviceId=randomUUID();
+      await db.query(
+        "INSERT INTO devices(id,owner_sub,alias,enabled) VALUES($1,$2,$3,false)",
+        [deviceId,proof.ownerSub,r.deviceAlias]);
+      await db.query(
+        "INSERT INTO device_credentials "+
+        "(device_id,owner_sub,public_key_der,key_fingerprint,pairing_challenge_id) "+
+        "VALUES($1,$2,$3,$4,$5)",
+        [deviceId,proof.ownerSub,r.devicePublicKeyDer,r.deviceFingerprint,r.id]);
+      await save(db,proof.record);
+      return {kind:"enrolled",deviceId,ownerSub:proof.ownerSub,deviceFingerprint:r.deviceFingerprint};
     });
+  }
+
+  /**
+   * Owner-scoped, irreversible credential revocation and project/grant
+   * disablement. Caller must authenticate the owner and enforce CSRF.
+   */
+  async revokeDevice(owner:string,id:string):Promise<boolean>{
+    if(!owner||owner.length>256||!UUID.test(id))return false;
+    const db=await this.pool.connect();
+    try{
+      await db.query("BEGIN");
+      const found=await db.query(
+        "SELECT d.id FROM devices d "+
+        "JOIN device_credentials c ON c.device_id=d.id AND c.owner_sub=d.owner_sub "+
+        "WHERE d.id=$1 AND d.owner_sub=$2 FOR UPDATE OF d,c",
+        [id,owner]);
+      if(found.rowCount!==1){await db.query("ROLLBACK");return false;}
+      await db.query(
+        "UPDATE device_credentials SET revoked_at=COALESCE(revoked_at,clock_timestamp()) "+
+        "WHERE device_id=$1 AND owner_sub=$2",[id,owner]);
+      await db.query("UPDATE devices SET enabled=false WHERE id=$1 AND owner_sub=$2",[id,owner]);
+      await db.query(
+        "UPDATE project_client_grants SET enabled=false WHERE owner_sub=$2 "+
+        "AND project_id IN (SELECT id FROM projects WHERE device_id=$1 AND owner_sub=$2)",
+        [id,owner]);
+      await db.query("UPDATE projects SET enabled=false WHERE device_id=$1 AND owner_sub=$2",[id,owner]);
+      await db.query("COMMIT");
+      return true;
+    }catch(error){
+      try{await db.query("ROLLBACK");}catch{/* original error wins */}
+      throw error;
+    }finally{db.release();}
+  }
+
+  /**
+   * Key lookup is intentionally fail-closed: caller MUST still prove live
+   * possession with a fresh replay-protected challenge before any connection.
+   */
+  async activeDevicePublicKey(owner:string,id:string):Promise<Buffer|null>{
+    if(!owner||owner.length>256||!UUID.test(id))return null;
+    const result=await this.pool.query<{public_key_der:string}>(
+      "SELECT c.public_key_der FROM devices d "+
+      "JOIN device_credentials c ON c.device_id=d.id AND c.owner_sub=d.owner_sub "+
+      "WHERE d.id=$1 AND d.owner_sub=$2 AND d.enabled=true AND c.revoked_at IS NULL",
+      [id,owner]);
+    return result.rows[0] ? Buffer.from(result.rows[0].public_key_der,"base64") : null;
   }
 }
