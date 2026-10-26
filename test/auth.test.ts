@@ -15,12 +15,16 @@ test("access tokens require signed issuer, audience, subject and scope", async (
     .setIssuedAt().setExpirationTime("2m").sign(privateKey);
   const valid = await mint({iss:config.issuer,aud:config.audience,sub:"owner-1",scope:"projects:read",client_id:"test-client"});
   assert.equal((await verifier(valid)).sub,"owner-1");
+  assert.equal(typeof (await verifier(valid)).issuedAt,"number");
   await assert.rejects(verifier(await mint({iss:"https://evil.example",aud:config.audience,sub:"owner-1",scope:"projects:read",client_id:"test-client"})));
   await assert.rejects(verifier(await mint({iss:config.issuer,aud:"https://wrong.example/mcp",sub:"owner-1",scope:"projects:read",client_id:"test-client"})));
   await assert.rejects(verifier(await mint({iss:config.issuer,aud:config.audience,sub:"owner-1",scope:"projects:write",client_id:"test-client"})));
   await assert.rejects(verifier(await mint({iss:config.issuer,aud:config.audience,scope:"projects:read",client_id:"test-client"})));
   const noExp = await new SignJWT({iss:config.issuer,aud:config.audience,sub:"owner-1",scope:"projects:read",client_id:"test-client"}).setProtectedHeader({alg:"RS256",kid:"key-1"}).sign(privateKey);
   await assert.rejects(verifier(noExp));
+  const noIssuedAt=await new SignJWT({iss:config.issuer,aud:config.audience,sub:"owner-1",scope:"projects:read",client_id:"test-client"})
+    .setProtectedHeader({alg:"RS256",kid:"key-1"}).setExpirationTime("2m").sign(privateKey);
+  await assert.rejects(verifier(noIssuedAt));
   await assert.rejects(verifier(await mint({
     iss:config.issuer,aud:config.audience,sub:"owner-1",
     scope:"projects:read",client_id:"test-client", cnf: {jkt:"proof-bound"}

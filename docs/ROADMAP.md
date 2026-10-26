@@ -79,3 +79,12 @@ No overall DoD is considered met by the above partial implementation.
 - [ ] Revoke outstanding refresh token families / define hard JWT cutoff
 - [ ] End-to-end browser login, OAuth callbacks and host token refresh tests
 - [ ] Device/local-connector permission enforcement, real client acceptance
+
+## Token lifecycle increment
+- [x] Signed JWT iat required and online per-client cutoff on MCP and management API
+- [x] Atomic grant disable + Better Auth refresh/opaque-token revoke (builtin mode)
+- [x] Clear refresh-token rotation replay caches; preserve other owners/clients
+- [x] New versioned migration 005, PostgreSQL security tests
+- [ ] Real issuer refresh rotation/replay and concurrent cutoff acceptance tests
+- [ ] Real Google/GitHub callback + ChatGPT/Claude/other hosts E2E
+- [ ] Local connector and execution cancellation using live authorization

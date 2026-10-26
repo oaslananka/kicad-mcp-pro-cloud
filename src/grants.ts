@@ -14,10 +14,28 @@ export interface GrantManagement {
 }
 
 export class PgGrantManagement extends PgInventory implements GrantManagement {
+  constructor(connectionString:string, private readonly builtInTokenStore=false) {
+    super(connectionString);
+  }
   async revokeClient(ownerSub: string, clientId: string): Promise<number> {
     const db = await this.pool.connect();
     try {
       await db.query("BEGIN");
+      await db.query(
+        "INSERT INTO client_token_cutoffs(owner_sub,client_id,revoked_at) VALUES($1,$2,now()) ON CONFLICT(owner_sub,client_id) DO UPDATE SET revoked_at=excluded.revoked_at",
+        [ownerSub,clientId]
+      );
+      if (this.builtInTokenStore) {
+        // Clear rotated refresh-token replay caches as well as active tokens.
+        await db.query(
+          'UPDATE "oauthRefreshToken" SET "revoked"=COALESCE("revoked",now()), "rotationReplayResponse"=NULL, "rotationReplayExpiresAt"=NULL WHERE "userId"=$1 AND "clientId"=$2',
+          [ownerSub,clientId]
+        );
+        await db.query(
+          'UPDATE "oauthAccessToken" SET "revoked"=COALESCE("revoked",now()) WHERE "userId"=$1 AND "clientId"=$2',
+          [ownerSub,clientId]
+        );
+      }
       const result = await db.query<{project_id:string}>(
         "UPDATE project_client_grants SET enabled=false WHERE owner_sub=$1 AND client_id=$2 AND enabled=true RETURNING project_id",
         [ownerSub,clientId]

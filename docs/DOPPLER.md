@@ -107,3 +107,16 @@ controlled migration step; the server never auto-migrates in production.
 OCI image builds use no secret. A verified runtime mechanism must inject
 Doppler configuration; do not pass static secrets as Docker build args, export
 them to plan/state output or echo them to deployment logs.
+
+## Token-cutoff DB migration and provider coordination
+
+No new Doppler secrets or GitHub Actions secrets were introduced. Deploy
+db/005_token_cutoff.pgsql before running an updated Cloud resource server.
+Both external and built-in modes need the cutoff table; built-in mode also
+needs the reviewed Better Auth tables in db/003_better_auth.pgsql.
+
+User/client revocation in built-in mode directly updates that pinned schema's
+refresh/opaque token records, including clearing rotation replay caches.
+This needs staging validation against Better Auth 1.7.13 on every provider
+upgrade. Never use this to manipulate accounts in another provider's database.
+JWT cutoffs must not be replaced by naive deletion of signed token strings.

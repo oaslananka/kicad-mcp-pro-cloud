@@ -156,3 +156,36 @@ must enforce identical current grants and permissions, not just token scope.
 This design does not claim refresh-token family revocation, a token denylist,
 device disconnection, or realtime remote execution cancellation. Those need
 separate acceptance tests before public production launch.
+
+## Built-in OAuth token lifecycle hardening (Issue #2)
+
+Connection revocation now creates/updates a per-owner-and-OAuth-client cutoff
+timestamp in client_token_cutoffs as part of the same transaction that disables
+the client's project grants. The Cloud resource server requires the signed JWT
+iat claim, then queries the current cutoff for every MCP request and every
+first-party grant-management mutation. Tokens issued in or before the UTC
+second of that cutoff are rejected, including after the user reconnects and
+re-enables project grants. Tokens issued within the cutoff second may need a
+new authorization after the following second; fail-closed is intentional.
+
+With the optional BUILTIN identity issuer enabled, the same database transaction
+also marks matching Better Auth oauthRefreshToken and oauthAccessToken
+records revoked and clears cached refresh rotation responses and expiry.
+This protects even already-rotated refresh token rows when a reuse window is
+enabled. Filtering is by BOTH current authenticated user and OAuth client,
+never by client alone. The external-issuer mode cannot mutate tokens it did not
+issue; its client-specific cutoff and grant denial still apply at THIS MCP
+resource server.
+
+This SQL is intentionally coupled to the PINNED Better Auth 1.7.13 schema.
+Do not upgrade the provider before verifying the actual refresh, rotation,
+introspection and revocation behavior and migrating safely. An in-flight
+refresh request concurrent with revocation cannot be declared fully excluded
+without an end-to-end concurrency test. Cloud access is checked online for
+every request, but this does not terminate an operation already in progress
+or revoke tokens accepted by other downstream resource servers.
+
+The db/005_token_cutoff.pgsql migration must run before deploying this
+resource server version. There are no automatic startup migrations. Any
+database outage at the authorization check returns a fail-closed error.
+Auth mode remains external by default; no live OAuth provider was enabled.

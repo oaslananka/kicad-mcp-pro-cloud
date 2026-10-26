@@ -14,7 +14,9 @@ const mockProject: Project = {
   enabled: true, maxMode: "readonly", available: false,
   reason: "remote_connector_not_implemented"
 };
+let accessAllowed = true;
 const inventory: Inventory = {
+  async isAccessTokenAllowed(){return accessAllowed;},
   async listDevices(owner,clientId): Promise<Device[]> {
     return owner === "user-a" && clientId === "test-client"
       ? [{id:mockProject.deviceId, alias:"Workstation", enabled:true, lastSeenAt:null, connected:false}]
@@ -41,7 +43,8 @@ const verify: Verifier = async token => {
   const actor: Actor = {
     sub: token === "test-user-b" ? "user-b" : "user-a",
     clientId: token === "admin-user-a" ? "portal-client" : token === "rogue-admin" ? "other-client" : "test-client",
-    scopes: new Set(["projects:read", ...(["admin-user-a","rogue-admin"].includes(token) ? ["projects:manage"] : [])])
+    scopes: new Set(["projects:read", ...(["admin-user-a","rogue-admin"].includes(token) ? ["projects:manage"] : [])]),
+    issuedAt: Math.floor(Date.now()/1000)
   };
   return actor;
 };
@@ -217,5 +220,27 @@ test("HTTP connection list requires signed-in session",async()=>{
     assert.equal(res.headers.get("location"),"/sign-in");
   } finally {
     await new Promise<void>(resolve=>proxy.close(()=>resolve()));
+  }
+});
+
+
+test("a revoked signed JWT is rejected at MCP and management edges",async()=>{
+  accessAllowed=false;
+  try {
+    const mcp=await fetch(endpoint+"/mcp",{
+      method:"POST",
+      headers:headers("test-user-a"),
+      body:JSON.stringify({jsonrpc:"2.0",id:731,method:"tools/list",params:{}})
+    });
+    assert.equal(mcp.status,401);
+    assert.equal((await mcp.json()).error,"revoked_access_token");
+    const grant=await fetch(endpoint+"/api/v1/projects/"+id+"/grants",{
+      method:"PUT",headers:headers("admin-user-a"),
+      body:JSON.stringify({clientId:"test-client",enabled:true,maxMode:"readonly"})
+    });
+    assert.equal(grant.status,401);
+    assert.equal((await grant.json()).error,"revoked_access_token");
+  } finally {
+    accessAllowed=true;
   }
 });
