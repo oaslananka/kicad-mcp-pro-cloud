@@ -87,6 +87,13 @@ sql "$source" "INSERT INTO pairing_challenges
     repeat('A',64),repeat('a',64),repeat('b',64),repeat('c',64),
     clock_timestamp() + interval '4 minutes')" >/dev/null
 
+# Synthetic revocable public-key identity, never a real private credential.
+sql "$source" "INSERT INTO device_credentials
+  (device_id,owner_sub,public_key_der,key_fingerprint,pairing_challenge_id)
+  VALUES ('c3e0d32d-d8bf-49c8-ae15-f2acc4c147b7','fixture-owner',
+    repeat('A',64),repeat('a',64),
+    'd83484f3-5515-46a5-96dd-3b92b73721c0')" >/dev/null
+
 echo 'Restore drill: streaming PostgreSQL custom backup to fresh target'
 docker exec "$source" pg_dump -Fc -U fixture -d cloud_fixture \
   --no-owner --no-acl |
@@ -116,5 +123,7 @@ assert_eq "$(sql "$target" 'SELECT count(*) FROM "oauthRefreshToken"')" "0" "rej
 source_ledger="$(sql "$source" "SELECT md5(string_agg(version || ':' || checksum, '|' ORDER BY version)) FROM schema_migrations")"
 target_ledger="$(sql "$target" "SELECT md5(string_agg(version || ':' || checksum, '|' ORDER BY version)) FROM schema_migrations")"
 assert_eq "$(sql "$target" 'SELECT count(*) FROM pairing_challenges')" "1" "restored pairing metadata"
+assert_eq "$(sql "$target" 'SELECT count(*) FROM device_credentials WHERE revoked_at IS NULL')" "1" "restored public-key device credential"
+assert_eq "$(sql "$target" "SELECT count(*) FROM device_credentials WHERE device_id='c3e0d32d-d8bf-49c8-ae15-f2acc4c147b7' AND owner_sub='fixture-owner'")" "1" "credential ownership"
 assert_eq "$target_ledger" "$source_ledger" "restored checksum ledger"
 echo 'Restore drill passed: all eight migrations, pairing metadata, cutoff policy and triggers recovered'
