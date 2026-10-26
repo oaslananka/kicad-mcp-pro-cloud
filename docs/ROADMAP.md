@@ -149,3 +149,16 @@ or production enrollment is available.
 - [ ] Trusted, rate-limited device challenge issuance and redemption transport.
 - [ ] Real OAuth provider/AI-host acceptance, production migration,
       physical device compatibility, rollout approval.
+
+
+## Device pairing HTTP bootstrap (disabled by default)
+
+- [x] Optional Cloud-only device challenge and Ed25519 redemption HTTP
+      interfaces with strict small JSON frames, no browser/user identity
+      headers, five-minute/one-use enrollment and disabled devices.
+- [x] Migration 012: HMAC-keyed PostgreSQL per-source/per-key/per-challenge
+      distributed issuance/redemption limits, concurrent race tests and
+      disposable backup/restore checks.
+- [ ] Trusted ingress source-IP/edge rate-limit acceptance and budget cleanup.
+- [ ] Real owner login + native device onboarding and secure local key custody.
+- [ ] Verified production migration/deployment and physical KiCad E2E.

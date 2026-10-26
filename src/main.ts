@@ -7,6 +7,7 @@ import {BoundConnectorConnections} from "./connector-transport-binding.js";
 import {attachConnectorWebSocket} from "./connector-ws.js";
 import {PgDeviceManagement} from "./device-management.js";
 import {PgPairingReview} from "./pairing-review.js";
+import {PgPairingDeviceAPI} from "./pairing-device-api.js";
 import { createVerifier } from "./auth.js";
 import { createHttpServer } from "./http.js";
 import { PgGrantManagement } from "./grants.js";
@@ -25,7 +26,14 @@ const connectorPool=(wsEnabled||Boolean(identity))?new Pool({connectionString:co
 const deviceManagement=identity&&connectorPool?new PgDeviceManagement(connectorPool):undefined;
 const pairingReview=identity&&connectorPool?
   new PgPairingReview(connectorPool,process.env.BETTER_AUTH_SECRET??""):undefined;
-const server=createHttpServer(config,inventory,createVerifier(config),inventory,identity,deviceManagement,pairingReview);
+const pairingDeviceEnabled=process.env.PAIRING_DEVICE_API_ENABLED==="true";
+if(pairingDeviceEnabled&&(!identity||!config.publicOrigin.startsWith("https://"))){
+  throw new Error("Device pairing API requires built-in identity and trusted HTTPS ingress");
+}
+const pairingDevice=pairingDeviceEnabled&&connectorPool?
+  new PgPairingDeviceAPI(connectorPool,process.env.BETTER_AUTH_SECRET??""):undefined;
+const server=createHttpServer(config,inventory,createVerifier(config),inventory,
+  identity,deviceManagement,pairingReview,pairingDevice);
 const connectorWs=wsEnabled&&connectorPool?attachConnectorWebSocket(server,{
   publicOrigin:config.publicOrigin,
   proofs:new PgDeviceHandshakes(connectorPool),
