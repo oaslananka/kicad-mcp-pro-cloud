@@ -21,6 +21,10 @@ test("access tokens require signed issuer, audience, subject and scope", async (
   await assert.rejects(verifier(await mint({iss:config.issuer,aud:config.audience,scope:"projects:read",client_id:"test-client"})));
   const noExp = await new SignJWT({iss:config.issuer,aud:config.audience,sub:"owner-1",scope:"projects:read",client_id:"test-client"}).setProtectedHeader({alg:"RS256",kid:"key-1"}).sign(privateKey);
   await assert.rejects(verifier(noExp));
+  await assert.rejects(verifier(await mint({
+    iss:config.issuer,aud:config.audience,sub:"owner-1",
+    scope:"projects:read",client_id:"test-client", cnf: {jkt:"proof-bound"}
+  })));
   await assert.rejects(verifier(await mint({iss:config.issuer,aud:config.audience,sub:"owner-1",scope:"projects:read"})));
 });
 test("startup rejects missing auth and insecure public origin",()=>{

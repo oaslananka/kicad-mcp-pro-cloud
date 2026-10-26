@@ -4,6 +4,7 @@ import type { Inventory } from "./store.js";
 import { createCloudMcpHandler } from "./mcp.js";
 import type { Verifier } from "./auth.js";
 import type { GrantManagement, AccessMode } from "./grants.js";
+import type { Identity } from "./identity.js";
 
 const MAX_BODY = 1024 * 1024;
 const noCache = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
@@ -43,9 +44,9 @@ function validOrigin(req: IncomingMessage, config: Config): boolean {
     (origin === config.publicOrigin || config.allowedOrigins.includes(origin)));
 }
 
-export function createHttpServer(config: Config, inventory: Inventory, verify: Verifier, grants?: GrantManagement): Server {
+export function createHttpServer(config: Config, inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">): Server {
   return createServer((req, res) => {
-    void handleRequest(req, res, config, inventory, verify, grants).catch(() => {
+    void handleRequest(req, res, config, inventory, verify, grants, identity).catch(() => {
       if (!res.headersSent) deny(res, 500, "internal_error");
       else res.end();
     });
@@ -54,7 +55,7 @@ export function createHttpServer(config: Config, inventory: Inventory, verify: V
 
 async function handleRequest(
   req: IncomingMessage, res: ServerResponse, config: Config,
-  inventory: Inventory, verify: Verifier, grants?: GrantManagement
+  inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">
 ): Promise<void> {
     try {
       if (!validHost(req, config.publicOrigin) || !validOrigin(req, config)) {
@@ -81,6 +82,35 @@ async function handleRequest(
           "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'"
         });
         res.end("KiCad MCP Pro Cloud: secure MCP foundation. User registration and local device pairing are not yet available.");
+        return;
+      }
+      const authPath = path === "/api/auth" || path.startsWith("/api/auth/") ||
+        path === "/.well-known/oauth-authorization-server" ||
+        path.startsWith("/.well-known/oauth-authorization-server/") ||
+        path === "/.well-known/openid-configuration" ||
+        path.startsWith("/.well-known/openid-configuration/");
+      if (authPath && identity) {
+        const method=req.method ?? "GET";
+        const headers=new Headers();
+        for (const [name,value] of Object.entries(req.headers)) {
+          if (typeof value === "string" && !["host","connection","transfer-encoding","content-length"].includes(name)) {
+            headers.set(name,value);
+          }
+        }
+        const payload=method==="GET" || method==="HEAD" ? undefined : await requestBody(req);
+        const forwarded=new Request(config.publicOrigin + (req.url ?? "/"),{
+          method,headers,body:payload?.toString("utf8")
+        });
+        const reply=await identity.handler(forwarded);
+        const outgoing=Object.fromEntries(reply.headers);
+        delete outgoing["set-cookie"];
+        delete outgoing["content-length"];
+        const cookies=reply.headers.getSetCookie();
+        res.writeHead(reply.status, {
+          ...noCache, ...outgoing,
+          ...(cookies.length ? {"Set-Cookie":cookies} : {})
+        });
+        res.end(Buffer.from(await reply.arrayBuffer()));
         return;
       }
       const grantRoute = /^\/api\/v1\/projects\/([0-9a-f-]{36})\/grants$/.exec(path);

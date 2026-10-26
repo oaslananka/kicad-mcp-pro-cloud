@@ -37,3 +37,16 @@
 - [ ] Device pairing, revocation, controller/project APIs and real connector.
 - [ ] Public app, deploy, rollback, privacy and acceptance tests with physical KiCad.
 No overall DoD is considered met by the above partial implementation.
+
+## Identity / deploy foundation
+- [x] Optional Better Auth + MCP + CIMD integration; disabled by default
+- [x] Strict OAuth configuration contract, encrypted provider tokens,
+      RS256 JWT keys and explicit no-implicit-link policy
+- [x] Schematised identity migration and ephemeral PostgreSQL metadata tests
+- [x] Secret-free OCI image build and documented OpenTofu adoption conditions
+- [ ] Register real Google/GitHub apps in development, staging and production
+- [ ] Implement and validate login, account-linking and OAuth consent UI
+- [ ] Validate real PKCE/CIMD access-token flows and ChatGPT/Claude clients
+- [ ] DPoP-aware resource verification for bound tokens (currently denied)
+- [ ] Select/provision secure production runtime, perform DB restore, rollout
+      and rollback acceptance (not done)

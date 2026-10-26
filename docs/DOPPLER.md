@@ -69,3 +69,41 @@ New configuration name: MANAGEMENT_CLIENT_ID. This must be the signed
 OAuth client_id of the first-party web management application, not ChatGPT.
 If unset, all management mutations fail closed. Its value belongs only in
 Doppler. Do not invent a provider client id before client registration.
+
+## Built-in identity foundation (disabled until verified)
+
+A Better Auth authorization server is optional. AUTH_MODE defaults to external.
+For test/staging, AUTH_MODE=builtin requires BETTER_AUTH_SECRET and real values
+for GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GITHUB_CLIENT_ID and
+GITHUB_CLIENT_SECRET. All these static runtime credentials must live in Doppler.
+
+With built-in auth, OAUTH_ISSUER must equal PUBLIC_ORIGIN + /api/auth and
+OAUTH_JWKS_URL must equal PUBLIC_ORIGIN + /api/auth/jwks. OAUTH_AUDIENCE
+remains PUBLIC_ORIGIN + /mcp. Missing or mismatched settings cause a startup
+error; there is no anonymous login bypass.
+
+Social OAuth callback URI patterns:
+- https://kicad-mcp-pro.oaslananka.dev/api/auth/callback/google
+- https://kicad-mcp-pro.oaslananka.dev/api/auth/callback/github
+
+Use provider registrations specific to each environment. The built-in option
+does not claim that Google/GitHub registrations or full consent/UI are ready.
+The social account linking policy disables implicit email-based account
+linking; the intended UX will let an authenticated user link a second provider.
+
+Better Auth encrypts social OAuth tokens before persisting them. JWT signing
+private keys are encrypted using the Doppler-supplied auth secret and stored in
+the protected PostgreSQL database, not in Doppler itself. Dynamic user sessions,
+grant records and provider tokens necessarily live in application storage.
+Doppler is the source of STATIC runtime configuration and cryptographic root
+secrets; protect/backup the database as sensitive data.
+
+The existing resource verifier rejects proof-of-possession-bound (cnf) tokens
+until an actual DPoP proof validator is integrated. Do not advertise DPoP
+compatibility. Review OAuth provider schema migration
+(db/003_better_auth.pgsql, pinned Better Auth 1.7.13) and apply only in a
+controlled migration step; the server never auto-migrates in production.
+
+OCI image builds use no secret. A verified runtime mechanism must inject
+Doppler configuration; do not pass static secrets as Docker build args, export
+them to plan/state output or echo them to deployment logs.
