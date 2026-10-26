@@ -1,6 +1,6 @@
 import type {ReactNode} from "react";
 import {renderToStaticMarkup} from "react-dom/server";
-export type PageKind="home"|"sign-in"|"account"|"consent"|"connections"|"notice";
+export type PageKind="home"|"sign-in"|"account"|"consent"|"connections"|"devices"|"notice";
 type Props={title:string;eyebrow?:string;summary?:string;kind:PageKind;children:ReactNode;navEnabled?:boolean};
 export function renderPage({title,eyebrow,summary,kind,children,navEnabled=true}:Props):string{
   return "<!doctype html>"+renderToStaticMarkup(
@@ -15,7 +15,8 @@ export function renderPage({title,eyebrow,summary,kind,children,navEnabled=true}
           <span>KiCad <b>MCP</b> <small>CLOUD</small></span></a>
         <nav aria-label="Primary"><a href="/" aria-current={kind==="home"?"page":undefined}>Overview</a>
           {navEnabled?<><a href="/account" aria-current={kind==="account"?"page":undefined}>Workspace</a>
-          <a href="/connections" aria-current={kind==="connections"?"page":undefined}>Connections</a></>:
+          <a href="/connections" aria-current={kind==="connections"?"page":undefined}>Connections</a>
+          <a href="/devices" aria-current={kind==="devices"?"page":undefined}>Devices</a></>:
           <span className="nav-disabled">Account access pending</span>}</nav>
         <div className="header-state"><i aria-hidden="true"/> LOCAL-FIRST PLATFORM</div>
       </div></header>
@@ -75,7 +76,8 @@ export function Account({name}:{readonly name:string}){
     <div className="account-banner"><span className="avatar">{name.trim().slice(0,1).toUpperCase()||"U"}</span>
       <div><div className="card-kicker">SIGNED IN WORKSPACE</div><h2>Welcome back, {name}</h2>
         <p>Manage the AI clients authorized to use your account.</p></div></div>
-    <div className="action-row"><a className="button primary" href="/connections">Manage AI connections ↗</a></div>
+    <div className="action-row"><a className="button primary" href="/connections">Manage AI connections ↗</a>
+      <a className="button secondary" href="/devices">Manage devices ↗</a></div>
   </section><section className="card future-card"><div className="card-kicker">COMING TO YOUR WORKSPACE</div>
     <h3>Device pairing &amp; project registry</h3>
     <p>Cloud device enrollment and project management are not yet available. Live KiCad access will require explicit approval.</p>

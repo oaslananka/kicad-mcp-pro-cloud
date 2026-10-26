@@ -1,5 +1,6 @@
 import {randomUUID} from "node:crypto";
 import type {Pool,PoolClient} from "pg";
+import {PgDeviceManagement} from "./device-management.js";
 import {issuePairing,reviewPairing,redeemPairing,
   type PairingRecord,type PairingStatus} from "./device-pairing.js";
 
@@ -117,44 +118,9 @@ export class PgPairingChallenges {
     });
   }
 
-  /**
-   * Owner-scoped, irreversible credential revocation and project/grant
-   * disablement. Caller must authenticate the owner and enforce CSRF.
-   */
+  /** Shared transactional owner revocation implementation. */
   async revokeDevice(owner:string,id:string):Promise<boolean>{
-    if(!owner||owner.length>256||!UUID.test(id))return false;
-    const db=await this.pool.connect();
-    try{
-      await db.query("BEGIN");
-      const found=await db.query(
-        "SELECT d.id FROM devices d "+
-        "JOIN device_credentials c ON c.device_id=d.id AND c.owner_sub=d.owner_sub "+
-        "WHERE d.id=$1 AND d.owner_sub=$2 FOR UPDATE OF d,c",
-        [id,owner]);
-      if(found.rowCount!==1){await db.query("ROLLBACK");return false;}
-      await db.query(
-        "UPDATE device_credentials SET revoked_at=COALESCE(revoked_at,clock_timestamp()) "+
-        "WHERE device_id=$1 AND owner_sub=$2",[id,owner]);
-      await db.query("UPDATE devices SET enabled=false WHERE id=$1 AND owner_sub=$2",[id,owner]);
-      await db.query(
-        "UPDATE connector_sessions SET state='revoked' "+
-        "WHERE device_id=$1 AND owner_sub=$2 AND state IN ('pending','active')",
-        [id,owner]);
-      await db.query(
-        "UPDATE device_handshake_challenges SET status='revoked' "+
-        "WHERE device_id=$1 AND owner_sub=$2 AND status='pending'",
-        [id,owner]);
-      await db.query(
-        "UPDATE project_client_grants SET enabled=false WHERE owner_sub=$2 "+
-        "AND project_id IN (SELECT id FROM projects WHERE device_id=$1 AND owner_sub=$2)",
-        [id,owner]);
-      await db.query("UPDATE projects SET enabled=false WHERE device_id=$1 AND owner_sub=$2",[id,owner]);
-      await db.query("COMMIT");
-      return true;
-    }catch(error){
-      try{await db.query("ROLLBACK");}catch{/* original error wins */}
-      throw error;
-    }finally{db.release();}
+    return new PgDeviceManagement(this.pool).revokeDevice(owner,id);
   }
 
   /**
