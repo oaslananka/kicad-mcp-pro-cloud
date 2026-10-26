@@ -155,6 +155,9 @@ async function handleRequest(
         let actor;
         try { actor = await verify(matched[1]); }
         catch { deny(res, 401, "invalid_access_token"); return; }
+        if (!(await inventory.isAccessTokenAllowed(actor.sub,actor.clientId,actor.issuedAt))) {
+          deny(res,401,"revoked_access_token"); return;
+        }
         if (!config.managementClientId || actor.clientId !== config.managementClientId || !actor.scopes.has("projects:manage")) {
           deny(res, 403, "forbidden"); return;
         }
@@ -210,6 +213,10 @@ async function handleRequest(
         actor = await verify(matched[1]);
       } catch {
         json(res, 401, { error: "invalid_access_token" }, { "WWW-Authenticate": bearerChallenge(config) });
+        return;
+      }
+      if (!(await inventory.isAccessTokenAllowed(actor.sub,actor.clientId,actor.issuedAt))) {
+        json(res,401,{error:"revoked_access_token"},{ "WWW-Authenticate":bearerChallenge(config) });
         return;
       }
       if (!actor.scopes.has("projects:read") || !actor.sub) {

@@ -17,6 +17,7 @@ export interface Project {
   reason: "remote_connector_not_implemented";
 }
 export interface Inventory {
+  isAccessTokenAllowed(ownerSub:string,clientId:string,issuedAt:number):Promise<boolean>;
   listDevices(ownerSub: string, clientId: string): Promise<Device[]>;
   listProjects(ownerSub: string, clientId: string): Promise<Project[]>;
   getProject(ownerSub: string, clientId: string, projectId: string): Promise<Project | null>;
@@ -29,6 +30,14 @@ export class PgInventory implements Inventory {
   protected readonly pool: pg.Pool;
   constructor(connectionString: string) {
     this.pool = new pg.Pool({ connectionString, max: 5, connectionTimeoutMillis: 3000, idleTimeoutMillis: 30000 });
+  }
+  async isAccessTokenAllowed(ownerSub:string,clientId:string,issuedAt:number):Promise<boolean> {
+    if(!Number.isSafeInteger(issuedAt) || issuedAt<1 || !ownerSub || !clientId) return false;
+    const result=await this.pool.query(
+      "SELECT NOT EXISTS (SELECT 1 FROM client_token_cutoffs WHERE owner_sub=$1 AND client_id=$2 AND revoked_at>=to_timestamp($3)) AS allowed",
+      [ownerSub,clientId,issuedAt]
+    );
+    return result.rows[0]?.allowed===true;
   }
   async listDevices(ownerSub: string, clientId: string): Promise<Device[]> {
     const result = await this.pool.query<DeviceRow>(

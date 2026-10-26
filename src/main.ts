@@ -5,8 +5,8 @@ import { PgGrantManagement } from "./grants.js";
 import { configuredIdentity } from "./identity.js";
 
 const config = loadConfig();
-const inventory = new PgGrantManagement(config.databaseUrl);
 const identity = configuredIdentity(config);
+const inventory = new PgGrantManagement(config.databaseUrl,Boolean(identity));
 const server = createHttpServer(config, inventory, createVerifier(config), inventory, identity);
 server.listen(config.port, config.host, () => {
   // Never log credential-bearing URLs, project data or request bodies.
