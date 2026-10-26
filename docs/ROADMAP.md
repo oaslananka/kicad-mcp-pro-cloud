@@ -88,3 +88,9 @@ No overall DoD is considered met by the above partial implementation.
 - [ ] Real issuer refresh rotation/replay and concurrent cutoff acceptance tests
 - [ ] Real Google/GitHub callback + ChatGPT/Claude/other hosts E2E
 - [ ] Local connector and execution cancellation using live authorization
+
+## Migration rollout safety
+- [x] Explicit status/apply CLI; checksum ledger; transaction/advisory lock
+- [x] Disposable PostgreSQL repeatability, contention, tamper tests
+- [ ] Backup/restore drill in the chosen staging deployment destination
+- [ ] Staging schema migration and rollback/recovery acceptance evidence

@@ -12,6 +12,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 COPY --chown=node:node --from=build /app/node_modules ./node_modules
 COPY --chown=node:node --from=build /app/dist ./dist
+COPY --chown=node:node ./db ./db
 COPY --chown=node:node --from=build /app/package.json ./package.json
 USER node
 EXPOSE 8787
