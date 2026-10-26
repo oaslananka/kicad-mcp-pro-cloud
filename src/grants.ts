@@ -22,10 +22,10 @@ export class PgGrantManagement extends PgInventory implements GrantManagement {
         "UPDATE project_client_grants SET enabled=false WHERE owner_sub=$1 AND client_id=$2 AND enabled=true RETURNING project_id",
         [ownerSub,clientId]
       );
-      for (const {project_id} of result.rows) {
+      if (result.rows.length) {
         await db.query(
-          "INSERT INTO client_grant_audit(owner_sub,actor_client_id,project_id,operation) VALUES($1,$2,$3,'client.revoke')",
-          [ownerSub,clientId,project_id]
+          "INSERT INTO client_grant_audit(owner_sub,actor_client_id,project_id,operation) SELECT $1,$2,id,'client.revoke' FROM unnest($3::uuid[]) AS id",
+          [ownerSub,clientId,result.rows.map(row=>row.project_id)]
         );
       }
       await db.query("COMMIT");

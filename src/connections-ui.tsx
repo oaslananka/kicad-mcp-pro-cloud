@@ -19,7 +19,7 @@ export function renderConnectionsPage(connections:DisplayConnection[], notice?:s
         <main>
           <h1>Connected AI clients</h1>
           <p>Removing access disables all project grants for the client. Already issued JWTs may remain valid until expiry, but disabled project grants prevent Cloud project discovery.</p>
-          {notice ? <p role="status">{notice}</p> : null}
+          {notice ? <output>{notice}</output> : null}
           {connections.length===0 ? <p>No active OAuth consents.</p> :
             <ul>{connections.map(c=>
               <li key={c.id}>

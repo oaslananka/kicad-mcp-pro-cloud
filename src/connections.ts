@@ -40,7 +40,9 @@ async function sign(secret:string,user:string,session:string,id:string,client:st
 async function token(secret:string,user:string,session:string,id:string,client:string,stamp:string,nonce:string):Promise<string> {
   return stamp+"."+nonce+"."+(await sign(secret,user,session,id,client,stamp,nonce));
 }
-async function validToken(request:Request,origin:string,secret:string,user:string,session:string,id:string,client:string,submitted:string):Promise<boolean> {
+type RevokeProof = {secret:string;user:string;session:string;id:string;client:string;submitted:string};
+async function validToken(request:Request,origin:string,proof:RevokeProof):Promise<boolean> {
+  const {secret,user,session,id,client,submitted}=proof;
   const state=readCookie(request,origin);
   if(!state || submitted.length>250) return false;
   const [stamp,nonce,sig,...extra]=submitted.split(".");
@@ -98,7 +100,7 @@ async function revoke(request:Request,identity:BrowserIdentity,origin:string,gra
   const owner=sessionUser(session);
   if(!owner) return failure(401);
   const {secret}=await identity.$context;
-  if(!(await validToken(request,origin,secret,owner.user,owner.session,id,clientId,csrf))) return failure(403);
+  if(!(await validToken(request,origin,{secret,user:owner.user,session:owner.session,id,client:clientId,submitted:csrf}))) return failure(403);
   let consent;
   try {
     consent=await identity.api.getOAuthConsent({query:{id},headers:request.headers});

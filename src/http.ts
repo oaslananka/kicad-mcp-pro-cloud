@@ -78,11 +78,14 @@ async function handleRequest(
         const browserRequest=new Request(config.publicOrigin+(req.url??"/"),{
           method,headers,body:body?.toString("utf8")
         });
-        const answer = path==="/consent"
-          ? await consentResponse(browserRequest,identity,config.publicOrigin,config.managementClientId)
-          : (path==="/connections" || path==="/connections/revoke")
-            ? await connectionsResponse(browserRequest,identity,config.publicOrigin,grants)
-            : await browserResponse(browserRequest,identity,config.publicOrigin);
+        let answer: Response | null;
+        if (path==="/consent") {
+          answer=await consentResponse(browserRequest,identity,config.publicOrigin,config.managementClientId);
+        } else if (path==="/connections" || path==="/connections/revoke") {
+          answer=await connectionsResponse(browserRequest,identity,config.publicOrigin,grants);
+        } else {
+          answer=await browserResponse(browserRequest,identity,config.publicOrigin);
+        }
         if (answer) {
           const responseHeaders=Object.fromEntries(answer.headers);
           delete responseHeaders["set-cookie"];
