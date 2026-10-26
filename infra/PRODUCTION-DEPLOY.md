@@ -40,3 +40,29 @@ From the checked-out repository root:
 
 Migrations do not execute at server startup. Production database backups
 remain necessary even though no app rollback image is retained.
+
+## Production-only operational checks and database recovery
+
+The following checks create neither staging nor a second application image.
+
+After a release, execute:
+    node scripts/production-smoke.mjs
+
+The script verifies HTTPS, the premium page and CSS, honest connector status,
+OAuth resource metadata, anonymous MCP denial and disabled signup.
+
+For a private single encrypted database snapshot, execute on the VPS:
+    doppler run -p kicad-mcp-pro -c prd_cloud -- bash scripts/production-backup.sh
+
+Production Doppler must contain KICAD_BACKUP_AGE_IDENTITY and its corresponding
+KICAD_BACKUP_AGE_RECIPIENT. The script streams a logical pg_dump through
+authenticated age encryption, verifies decryption and pg_restore archive
+parsing, and atomically replaces one private encrypted snapshot in the
+Ubuntu account's home directory. It does not create Docker images or leave
+plaintext PostgreSQL backups.
+
+Limits: this same-host snapshot is NOT offsite disaster recovery and archive
+parsing is NOT a full restore test. VPS disk loss could destroy both the live
+database and this snapshot. No automated backup cadence or remote retention
+policy is configured yet. A remote destination and restore acceptance are
+needed before storing real customer data.

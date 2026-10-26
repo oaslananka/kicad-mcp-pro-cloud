@@ -1,25 +1,24 @@
-# Infrastructure-as-code adoption gate
+# Production infrastructure
 
-We now produce a secret-free OCI application image, but production destination,
-network policy, Cloudflare DNS ownership, PostgreSQL backup/restore, auth
-registrations, and deployment credentials are not yet verified. This directory
-therefore contains no unreviewed OpenTofu provider or resource definitions.
+The reviewed production Docker Compose deployment now runs on the existing
+VPS and healthy Cloudflare Tunnel at:
+https://kicad-mcp-pro.oaslananka.dev
 
-When the destination is verified, use a minimal, reviewed OpenTofu module in
-this repository. Pin provider and OpenTofu versions; separate state per
-environment; review plan before apply. Never fetch app secrets into OpenTofu
-state or pass them through outputs, plan, or cloud-init. Provision only concrete
-infrastructure (HTTPS routing, firewall, persistent DB and DNS if appropriate).
-Do not replace working equivalent services merely for consistency.
+An isolated PostgreSQL 17 container, private Docker database network,
+persistent volume and a single production application image are installed.
+No host-side database or application ports are published. Cloudflare tunnel
+ingress is shared with existing services, which must not be interrupted.
 
-Build the image without secrets. At runtime inject Doppler configuration through
-a controlled secret bootstrap. Docker environment variables can be retrieved by
-privileged Docker operators; do not assume container inspect is a secret vault.
-Do not copy Doppler downloads to repository files or image layers.
+Doppler kicad-mcp-pro/prd_cloud holds runtime configuration and secrets;
+GitHub Secrets contains only DOPPLER_TOKEN. No staging environment or
+rollback application image is retained by user requirement. This existing
+VPS/tunnel setup needs no OpenTofu re-provisioning; provision additional
+resources only for a demonstrated requirement and avoid duplicate services.
 
-Production release needs real login + consent flows, MCP clients, database
-restore drill, digest-pinned image deploy and tested rollback. None are proven
-by this image build.
+Public premium UI and anonymous token enforcement are deployed. Live Google
+and GitHub sign-in, AI-client OAuth and local KiCad device execution are still
+unaccepted/unimplemented. See infra/PRODUCTION-DEPLOY.md and
+docs/OAUTH-PRODUCTION-ACCEPTANCE.md.
 
 ## Controlled versioned PostgreSQL migrations
 
@@ -66,6 +65,7 @@ checks the following:
 For local reproduction, build the reviewed OCI image and run:
     bash scripts/ci-db-restore-drill.sh kicad-mcp-pro-cloud:ci
 
-This is not a real staging recovery exercise: it does not validate external
-backup encryption, retention, offsite copies, real restore RTO/RPO, or
-application rollback. Those require an approved staging environment.
+This disposable test is not a production restore: it does not validate
+offsite backup retention, remote restore RTO/RPO or full database recovery.
+Production has no staging or retained rollback app image by policy. See
+the production backup/restore limits in infra/PRODUCTION-DEPLOY.md.
