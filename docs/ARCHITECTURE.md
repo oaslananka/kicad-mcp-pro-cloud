@@ -83,3 +83,17 @@ No public login or deploy is enabled by this commit.
 The OCI image is unprivileged and contains compiled application code only.
 See infra/README.md for IaC/deployment adoption boundaries. There is no
 presumption that running a container equals validated release.
+
+## Web login entry point (Cloud-only increment)
+
+The optional builtin provider has a minimal /sign-in HTML page with Google
+and GitHub buttons and a session-protected /account page. The first-party
+POST /auth/start/:provider checks exact Origin, validates form input, verifies
+signed OAuth continuation parameters and uses Better Auth to obtain the real
+social authorization URL and HttpOnly state cookie. Only expected Google or
+GitHub HTTPS authorization destinations are allowed; a user-supplied redirect
+URL is not accepted.
+
+The HTML has restrictive CSP, no-store, no-referrer and escaped user content.
+There is no OAuth consent page yet. This is not full social login acceptance
+or real callback/token-exchange evidence. AUTH_MODE defaults to external.

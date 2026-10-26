@@ -77,3 +77,12 @@ in GitHub secrets; inject runtime values from Doppler into a protected deploy
 environment, not the Docker build. See docs/DOPPLER.md and infra/README.md.
 No OpenTofu apply, Cloudflare resource creation or production deployment has
 occurred.
+
+### Experimental first-party browser login
+
+With explicitly enabled Better Auth and registered social providers, the
+/sign-in page initiates Google/GitHub OAuth through a first-party POST.
+The /account route requires a session. Signed OAuth continuation data is
+validated before forwarding. The provider remains disabled by default;
+consent, real callbacks and device enrollment are not complete. Do not
+publish this as a production-ready ChatGPT/Claude plugin.
