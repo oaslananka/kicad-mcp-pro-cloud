@@ -1,5 +1,6 @@
 import {createHash,createPublicKey,randomBytes,randomUUID,timingSafeEqual,verify} from "node:crypto";
-import type {Pool,PoolClient} from "pg";
+import type {Pool} from "pg";
+import {lockActiveDeviceKey,withDeviceTransaction} from "./device-db-transaction.js";
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TTL_MS=60_000;
@@ -46,37 +47,10 @@ export function deviceHandshakeProof(challengeId:string,deviceId:string,nonce:st
 export class PgDeviceHandshakes{
   constructor(private readonly pool:Pool){}
 
-  private async withDb<T>(action:(db:PoolClient)=>Promise<T>):Promise<T>{
-    const db=await this.pool.connect();
-    try{
-      await db.query("BEGIN");
-      const value=await action(db);
-      await db.query("COMMIT");
-      return value;
-    }catch(error){
-      try{await db.query("ROLLBACK");}catch{/* preserve root error */}
-      throw error;
-    }finally{db.release();}
-  }
-
-  /**
-   * Lock d,c first: same order as revocation, preventing a successful
-   * handshake from bypassing already-committed credential revocation.
-   */
-  private async activeKey(db:PoolClient,owner:string,deviceId:string):Promise<string|null>{
-    const result=await db.query<{public_key_der:string}>(
-      "SELECT c.public_key_der FROM devices d "+
-      "JOIN device_credentials c ON c.device_id=d.id AND c.owner_sub=d.owner_sub "+
-      "WHERE d.id=$1 AND d.owner_sub=$2 AND d.enabled=true AND c.revoked_at IS NULL "+
-      "FOR UPDATE OF d,c",
-      [deviceId,owner]);
-    return result.rows[0]?.public_key_der??null;
-  }
-
   async issue(owner:string,deviceId:string):Promise<ChallengeIssue>{
     if(!validOwner(owner)||!UUID.test(deviceId))return {kind:"unavailable"};
-    return this.withDb<ChallengeIssue>(async db=>{
-      if(!await this.activeKey(db,owner,deviceId))return {kind:"unavailable"};
+    return withDeviceTransaction<ChallengeIssue>(this.pool,async db=>{
+      if(!await lockActiveDeviceKey(db,owner,deviceId))return {kind:"unavailable"};
       await db.query(
         "UPDATE device_handshake_challenges SET status='expired' "+
         "WHERE device_id=$1 AND owner_sub=$2 AND status='pending' "+
@@ -109,8 +83,8 @@ export class PgDeviceHandshakes{
   ):Promise<ChallengeVerification>{
     if(!validOwner(owner)||!UUID.test(deviceId)||!UUID.test(challengeId))
       return {kind:"unavailable"};
-    return this.withDb<ChallengeVerification>(async db=>{
-      const keyDer=await this.activeKey(db,owner,deviceId);
+    return withDeviceTransaction<ChallengeVerification>(this.pool,async db=>{
+      const keyDer=await lockActiveDeviceKey(db,owner,deviceId);
       if(!keyDer)return {kind:"unavailable"};
       const result=await db.query<HandshakeRow>(
         "SELECT id,device_id,owner_sub,nonce_sha256,expires_at,status,failures "+
