@@ -21,9 +21,10 @@ export function createVerifier(config: Pick<Config, "jwksUrl" | "issuer" | "audi
     const scope = typeof payload.scope === "string" ? payload.scope : "";
     const scopes = new Set(scope.split(/\s+/).filter(Boolean));
     if (!scopes.has("projects:read")) throw new Error("Missing projects:read permission");
+    if (typeof payload.client_id !== "string" || !payload.client_id) throw new Error("Token missing client_id");
     return {
       sub: payload.sub,
-      clientId: typeof payload.client_id === "string" ? payload.client_id : "unknown",
+      clientId: payload.client_id,
       scopes
     };
   };

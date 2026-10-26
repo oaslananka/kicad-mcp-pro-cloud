@@ -52,3 +52,11 @@ Read [docs/DOPPLER.md](docs/DOPPLER.md) before provisioning.
 
 Routine pull-request CI does not fetch secrets; trusted maintainers can
 run the manually triggered Doppler Configuration Validation workflow.
+
+## Client authorization (incremental Issue #2)
+
+The remote MCP now exposes project metadata only for a signed OAuth client_id
+which has an explicit, enabled project-client grant. Cross-client access is
+denied by default. A first-party management API can adjust grants, but requires
+projects:manage and a separate MANAGEMENT_CLIENT_ID from Doppler.
+This does not imply any device is paired or a KiCad operation can run.

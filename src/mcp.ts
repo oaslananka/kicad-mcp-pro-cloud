@@ -25,16 +25,16 @@ export function createCloudMcpHandler(inventory: Inventory, actor: Actor) {
     mcp.registerTool("list_devices", {
       description: "List the authenticated user's registered device metadata. Connected always false until a verified device relay exists.",
       inputSchema: z.object({}), annotations: readonly
-    }, async () => text({ devices: await inventory.listDevices(actor.sub) }));
+    }, async () => text({ devices: await inventory.listDevices(actor.sub,actor.clientId) }));
     mcp.registerTool("list_projects", {
       description: "List only enabled KiCad project aliases owned by the authenticated user. No local paths or design contents.",
       inputSchema: z.object({}), annotations: readonly
-    }, async () => text({ projects: await inventory.listProjects(actor.sub) }));
+    }, async () => text({ projects: await inventory.listProjects(actor.sub,actor.clientId) }));
     mcp.registerTool("get_project", {
       description: "Find an enabled project by opaque UUID within the authenticated user's inventory; never returns paths or KiCad data.",
       inputSchema: z.object({ project_id: z.string().uuid() }), annotations: readonly
     }, async ({ project_id }) => {
-      const project = await inventory.getProject(actor.sub, project_id);
+      const project = await inventory.getProject(actor.sub,actor.clientId,project_id);
       return text(project ? { project } : { found: false, message: "Project not found or not accessible" });
     });
     return mcp;

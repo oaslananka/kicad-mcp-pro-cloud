@@ -13,14 +13,15 @@ test("access tokens require signed issuer, audience, subject and scope", async (
   const mint = (claims: Record<string,unknown>) => new SignJWT(claims)
     .setProtectedHeader({alg:"RS256",kid:"key-1"})
     .setIssuedAt().setExpirationTime("2m").sign(privateKey);
-  const valid = await mint({iss:config.issuer,aud:config.audience,sub:"owner-1",scope:"projects:read"});
+  const valid = await mint({iss:config.issuer,aud:config.audience,sub:"owner-1",scope:"projects:read",client_id:"test-client"});
   assert.equal((await verifier(valid)).sub,"owner-1");
-  await assert.rejects(verifier(await mint({iss:"https://evil.example",aud:config.audience,sub:"owner-1",scope:"projects:read"})));
-  await assert.rejects(verifier(await mint({iss:config.issuer,aud:"https://wrong.example/mcp",sub:"owner-1",scope:"projects:read"})));
-  await assert.rejects(verifier(await mint({iss:config.issuer,aud:config.audience,sub:"owner-1",scope:"projects:write"})));
-  await assert.rejects(verifier(await mint({iss:config.issuer,aud:config.audience,scope:"projects:read"})));
-  const noExp = await new SignJWT({iss:config.issuer,aud:config.audience,sub:"owner-1",scope:"projects:read"}).setProtectedHeader({alg:"RS256",kid:"key-1"}).sign(privateKey);
+  await assert.rejects(verifier(await mint({iss:"https://evil.example",aud:config.audience,sub:"owner-1",scope:"projects:read",client_id:"test-client"})));
+  await assert.rejects(verifier(await mint({iss:config.issuer,aud:"https://wrong.example/mcp",sub:"owner-1",scope:"projects:read",client_id:"test-client"})));
+  await assert.rejects(verifier(await mint({iss:config.issuer,aud:config.audience,sub:"owner-1",scope:"projects:write",client_id:"test-client"})));
+  await assert.rejects(verifier(await mint({iss:config.issuer,aud:config.audience,scope:"projects:read",client_id:"test-client"})));
+  const noExp = await new SignJWT({iss:config.issuer,aud:config.audience,sub:"owner-1",scope:"projects:read",client_id:"test-client"}).setProtectedHeader({alg:"RS256",kid:"key-1"}).sign(privateKey);
   await assert.rejects(verifier(noExp));
+  await assert.rejects(verifier(await mint({iss:config.issuer,aud:config.audience,sub:"owner-1",scope:"projects:read"})));
 });
 test("startup rejects missing auth and insecure public origin",()=>{
   const base = {

@@ -35,3 +35,32 @@ Sources:
 - https://modelcontextprotocol.io/specification/2026-07-28
 - https://ts.sdk.modelcontextprotocol.io/v2/serving/http
 - https://developers.openai.com/plugins/build/auth
+
+## Issue #2 incremental boundary: per-client project grants
+
+A verified OAuth access token now needs a signed client_id claim, along with
+the existing issuer, audience, expiry, user subject and projects:read scope.
+A project is visible to an MCP client only if user, device, project and the
+explicit client-specific grant all match and are enabled. Unapproved clients
+discover zero projects and zero devices (default deny).
+
+Cloud implements a small management-only endpoint:
+PUT /api/v1/projects/{project-uuid}/grants
+JSON: {"clientId":"registered-oauth-client","enabled":true,"maxMode":"readonly"}.
+
+This endpoint requires projects:read AND projects:manage, and signed client_id
+must equal MANAGEMENT_CLIENT_ID configured exclusively in Doppler. It accepts
+strict JSON only; absolute project paths and arbitrary extra attributes fail.
+The transaction checks owner, project maximum mode, appends a metadata-only
+audit event, and rejects foreign or nonexistent projects without revealing
+their identity. The production IdP must map actual client identity to a
+signed client_id claim. Do not let callers self-declare that claim.
+
+Manufacturing and editing modes are not interchangeable super-roles:
+when project/grant modes differ, discovered policy falls back to readonly.
+Project-level enable/disable, server-side local enforcement and runtime
+KiCad operations are not implemented in this increment.
+
+There is still no actual OAuth authorization server, browser signin,
+device pairing, persistent relay, local KiCad activity or production UI.
+The public endpoint remains unusable until the approved provider exists.

@@ -7,6 +7,7 @@ export interface Config {
   audience: string;
   databaseUrl: string;
   allowedOrigins: string[];
+  managementClientId: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -46,5 +47,5 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       throw new Error("ALLOWED_ORIGINS entries must be exact HTTPS origins");
     }
   }
-  return { host, port, publicOrigin: origin.origin, issuer, jwksUrl, audience, databaseUrl, allowedOrigins };
+  return { host, port, publicOrigin: origin.origin, issuer, jwksUrl, audience, databaseUrl, allowedOrigins, managementClientId: env.MANAGEMENT_CLIENT_ID ?? "" };
 }
