@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { generateKeyPairSync, randomBytes, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import {
   issuePairing, reviewPairing, redeemPairing, redemptionProof,
   PAIRING_TTL_MS, MAX_USER_CODE_ATTEMPTS
@@ -26,6 +26,8 @@ test("creates high-entropy separate secrets and stores only keyed hashes", () =>
   const serialized = JSON.stringify(a.record);
   assert.ok(!serialized.includes(a.userCode));
   assert.ok(!serialized.includes(a.deviceCode));
+  assert.equal(a.record.deviceFingerprint, createHash("sha256")
+    .update(Buffer.from(a.record.devicePublicKeyDer, "base64")).digest("hex"));
   assert.equal(a.record.ownerSub, null);
   assert.equal(a.record.state, "pending");
   assert.equal(a.record.expiresAtMs, now + PAIRING_TTL_MS);
