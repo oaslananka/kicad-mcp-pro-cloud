@@ -20,7 +20,7 @@ test("revocation atomically disables grants, invalidates refresh family replay a
       db=new pg.Pool({connectionString:scoped});
       for(const file of [
         "001_inventory.pgsql","002_client_grants.pgsql","003_better_auth.pgsql",
-        "004_client_revocation.pgsql","005_token_cutoff.pgsql"
+        "004_client_revocation.pgsql","005_token_cutoff.pgsql","006_oauth_issuance_fence.pgsql"
       ]) {
         await db.query(await readFile(new URL("../db/"+file,import.meta.url),"utf8"));
       }

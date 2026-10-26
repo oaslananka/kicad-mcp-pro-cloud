@@ -120,3 +120,12 @@ refresh/opaque token records, including clearing rotation replay caches.
 This needs staging validation against Better Auth 1.7.13 on every provider
 upgrade. Never use this to manipulate accounts in another provider's database.
 JWT cutoffs must not be replaced by naive deletion of signed token strings.
+
+## Schema version 006 preflight
+
+Migration db/006_oauth_issuance_fence.pgsql must be applied after 005 and
+before any deployment enabling AUTH_MODE=builtin. It installs the built-in
+provider issuance/replay fence against revoked client grants. No additional
+secret is needed. It remains forbidden to enable production public OAuth
+without real-provider login/consent and host interoperability acceptance.
+Review pinned Better Auth schema, database backup and staging restore first.

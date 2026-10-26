@@ -94,3 +94,14 @@ No overall DoD is considered met by the above partial implementation.
 - [x] Disposable PostgreSQL repeatability, contention, tamper tests
 - [ ] Backup/restore drill in the chosen staging deployment destination
 - [ ] Staging schema migration and rollback/recovery acceptance evidence
+
+## Issue #9 refresh/revocation concurrency
+- [x] Real Better Auth refresh grant, rotation replay and post-revoke tests
+- [x] Deterministic delayed-successor interleaving with user/client revocation
+- [x] PostgreSQL advisory fence for late token INSERT and replay UPDATE
+- [x] Protect old authorization-code lineage after fresh consent
+- [x] Migration 006, disposable Postgres CI coverage and version pin retained
+- [ ] Controlled production-friendly OAuth invalid_grant for trigger denial
+- [ ] Real provider login/authorization-code and explicit re-consent callback
+- [ ] Host refresh/retry acceptance across ChatGPT, Claude, Gemini and Grok
+- [ ] Real release staging, restore and migration rollback/recovery drill

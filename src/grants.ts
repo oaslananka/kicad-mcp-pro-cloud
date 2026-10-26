@@ -21,6 +21,14 @@ export class PgGrantManagement extends PgInventory implements GrantManagement {
     const db = await this.pool.connect();
     try {
       await db.query("BEGIN");
+      if (this.builtInTokenStore) {
+        // Serialize with the issuance/replay triggers, including across
+        // independent Cloud instances that share this PostgreSQL database.
+        await db.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1 || chr(31) || $2, 48296018))",
+          [ownerSub,clientId]
+        );
+      }
       await db.query(
         "INSERT INTO client_token_cutoffs(owner_sub,client_id,revoked_at) VALUES($1,$2,now()) ON CONFLICT(owner_sub,client_id) DO UPDATE SET revoked_at=excluded.revoked_at",
         [ownerSub,clientId]
