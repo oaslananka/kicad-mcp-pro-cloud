@@ -1,8 +1,8 @@
 -- Fail-closed revocation fence for Better Auth's pinned OAuth token tables.
 -- Both new refresh and opaque access token rows are blocked after a client
--- revocation. New social login/re-authorization needs an explicit
--- session-bound reset protocol, which is NOT provided in this increment.
--- A new, explicit OAuth consent allows ONLY a new authorization-code lineage.
+-- revocation. A new explicit OAuth consent permits ONLY a new
+-- authorization-code lineage; real social-login callback acceptance remains
+-- unverified and the built-in provider stays disabled in production.
 -- Previous token families remain denied, even if their delayed issuance
 -- races with a legitimate fresh consent. The advisory key and salt MUST
 -- match PgGrantManagement.revokeClient.
