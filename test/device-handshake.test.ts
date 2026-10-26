@@ -98,8 +98,8 @@ test("PostgreSQL handshake single-use, expiry, lockout, owner scope and revocati
     assert.equal(expiry.kind,"issued");
     if(expiry.kind!=="issued")return;
     await db.query("UPDATE device_handshake_challenges SET "+
-      "created_at=clock_timestamp()-interval '50 seconds', "+
-      "expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",
+      "created_at=statement_timestamp()-interval '50 seconds', "+
+      "expires_at=statement_timestamp()-interval '1 second' WHERE id=$1",
       [expiry.challengeId]);
     const expiredSignature=sign(null,deviceHandshakeProof(
       expiry.challengeId,deviceId,expiry.nonce),keys.privateKey);

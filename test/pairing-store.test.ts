@@ -74,8 +74,8 @@ test("isolated PostgreSQL pairing transitions serialize competing workers",
 
     const expired=await store.issue("Expired PC",der);
     await pool.query("UPDATE pairing_challenges SET "+
-      "created_at=clock_timestamp()-interval '5 minutes 1 second',"+
-      "expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",[expired.id]);
+      "created_at=statement_timestamp()-interval '5 minutes 1 second',"+
+      "expires_at=statement_timestamp()-interval '1 second' WHERE id=$1",[expired.id]);
     assert.equal(await store.review(expired.id,"owner-1",expired.userCode,"approve"),"unavailable");
     assert.equal((await pool.query("SELECT state FROM pairing_challenges WHERE id=$1",[expired.id])).rows[0].state,"expired");
     assert.equal((await store.enroll("not-a-uuid",first.deviceCode,proof)).kind,"unavailable");

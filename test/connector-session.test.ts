@@ -112,8 +112,8 @@ test("Postgres bound sessions serialize proof, signed events, expiry, close and 
     assert.equal(expired.kind,"issued");
     if(expired.kind!=="issued")return;
     await db.query("UPDATE device_handshake_challenges SET "+
-      "created_at=clock_timestamp()-interval '65 seconds',"+
-      "expires_at=clock_timestamp()-interval '5 seconds' WHERE id=$1",
+      "created_at=statement_timestamp()-interval '65 seconds',"+
+      "expires_at=statement_timestamp()-interval '5 seconds' WHERE id=$1",
       [expired.challengeId]);
     const expiredSig=sign(null,connectorSessionProof(expired.sessionId,
       expired.challengeId,device,expired.nonce,expired.binding),keys.privateKey);
