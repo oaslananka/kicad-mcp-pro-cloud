@@ -10,13 +10,13 @@ function ipAddress(raw:string):string|null{
   if(kind===4)return raw;
   if(kind===6){
     try{
-      const host=new URL("http://["+raw+"]/").hostname;
+      const host=new URL("https://["+raw+"]/").hostname;
       if(!host.startsWith("[")||!host.endsWith("]"))return null;
       const ipv6=host.slice(1,-1);
       // Both dotted and hexadecimal IPv4-mapped spellings must share one key.
       const mapped=/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(ipv6);
       if(mapped){
-        const hi=parseInt(mapped[1],16),lo=parseInt(mapped[2],16);
+        const hi=Number.parseInt(mapped[1],16),lo=Number.parseInt(mapped[2],16);
         return [hi>>8,hi&255,lo>>8,lo&255].join(".");
       }
       return ipv6;
