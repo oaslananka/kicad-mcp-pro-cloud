@@ -169,3 +169,25 @@ test("identity routes are proxied only when enabled, preserving response cookies
     await new Promise<void>(resolve=>proxy.close(()=>resolve()));
   }
 });
+
+test("consent URL is unreachable when built-in identity is disabled",async()=>{
+  const response=await fetch(endpoint+"/consent?client_id=unknown");
+  assert.equal(response.status,404);
+});
+test("HTTP consent rejects forged unsigned request even if identity is configured",async()=>{
+  const mockIdentity={
+    handler:async (_request:Request)=>Response.json({client_id:"unknown",client_name:"Unknown"}),
+    $context:Promise.resolve({secret:"test-auth-secret-for-consent"}),
+    api:{getSession:async()=>({user:{id:"test-user"}})}
+  };
+  const proxy=createHttpServer(config,inventory,verify,grants,mockIdentity as never);
+  await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
+  const port=(proxy.address() as AddressInfo).port;
+  try{
+    const response=await fetch("http://127.0.0.1:"+port+"/consent?client_id=unknown&scope=projects%3Aread");
+    assert.equal(response.status,403);
+    assert.doesNotMatch(await response.text(),/Approve<\/button>/);
+  }finally{
+    await new Promise<void>(resolve=>proxy.close(()=>resolve()));
+  }
+});

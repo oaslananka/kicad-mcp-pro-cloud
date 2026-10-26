@@ -97,3 +97,28 @@ URL is not accepted.
 The HTML has restrictive CSP, no-store, no-referrer and escaped user content.
 There is no OAuth consent page yet. This is not full social login acceptance
 or real callback/token-exchange evidence. AUTH_MODE defaults to external.
+
+## OAuth consent increment (Issue #2, not production)
+
+The optional built-in provider now offers a minimal server-rendered /consent
+screen. It validates the exact Better Auth signed and unexpired OAuth query,
+requires an authenticated user, resolves the public OAuth client from the
+provider database, and displays all requested scopes and optional claims.
+No KiCad projects are automatically shared by OAuth consent.
+
+The approval/denial POST uses a short-lived CSRF HMAC bound to the current
+user, signed request, nonce and timestamp. It additionally checks the same
+browser Origin and rejects extra form fields, modified requests and unknown
+clients. Only a first-party OAuth client configured in Doppler as
+MANAGEMENT_CLIENT_ID can request the projects:manage scope. The server delegates
+both approval and denial to Better Auth's OAuth consent endpoint; it does not
+mint, store or forge access tokens. The destination is subject to the
+authorization server's own client/redirect validation plus a restricted
+HTTP(S) redirect check.
+
+No production client is registered, no real Google/GitHub callback, no
+browser-based consent acceptance with ChatGPT/Claude, and no user-facing
+consent revocation UI have yet been proven. Auth remains disabled by default.
+Revoking an OAuth consent does not by itself immediately invalidate an
+already-issued bearer token: project-client grants also need revocation to
+prevent continued authorized project discovery or execution.

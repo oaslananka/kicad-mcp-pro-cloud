@@ -60,3 +60,12 @@ No overall DoD is considered met by the above partial implementation.
 - [ ] Real provider registration and social callback acceptance
 - [ ] ChatGPT/Claude real OAuth interoperability, session rotation
 - [ ] Device pairing, project dashboard, local KiCad connector and production deploy
+
+## OAuth consent increment
+- [x] Signed, expiring query and authenticated-session verification
+- [x] Real client metadata lookup, escaped scope/claims and explicit allow/deny
+- [x] CSRF nonce/HMAC, no automatic project permissions and limited management scope
+- [x] Fake-provider unit tests and HTTP fail-closed tests
+- [ ] Real provider authorisation end-to-end and client-specific consent acceptance
+- [ ] UI to review/revoke consents and disable client project grants together;
+      check existing access-token validity separately

@@ -86,3 +86,12 @@ The /account route requires a session. Signed OAuth continuation data is
 validated before forwarding. The provider remains disabled by default;
 consent, real callbacks and device enrollment are not complete. Do not
 publish this as a production-ready ChatGPT/Claude plugin.
+
+### OAuth consent boundary
+
+The experimental /consent route displays verified client name and requested
+scopes only after signed-query and user-session validation. A separate
+first-party management client identity is needed for projects:manage.
+Approval and denial delegate to Better Auth and never automatically share
+a local KiCad project. OAuth consent revocation UX and live provider/client
+acceptance remain unfinished. Built-in authorization stays disabled by default.
