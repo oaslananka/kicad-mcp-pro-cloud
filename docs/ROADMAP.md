@@ -172,3 +172,9 @@ or production enrollment is available.
       direct-origin bypass prevention in production.
 - [ ] Independently configure distributed edge rate limits and inspect
       Worker/Transform behavior before enabling any device feature.
+
+## Isolated tunnel topology acceptance
+
+- [x] Cloud-only read-only Docker topology verifier and adversarial tests for private, pinned, two-container ingress and no app port publishing.
+- [ ] Controlled non-disruptive migration from shared tunnel bridge to an isolated Cloud-specific ingress path.
+- [ ] Cloudflare edge WAF rules, source header authenticity, WebSocket real-user acceptance and rollback evidence.
