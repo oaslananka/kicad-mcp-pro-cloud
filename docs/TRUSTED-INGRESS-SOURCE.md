@@ -61,3 +61,5 @@ device signatures; no KiCad remote command dispatcher is exposed.
 
 No proxy/container addresses or sensitive operational network layout are
 committed here; discover them through authorized read-only Ops inspection.
+
+The read-only Docker isolation and fixed-peer release preflight is documented in [Ingress topology acceptance](INGRESS-TOPOLOGY-ACCEPTANCE.md). A passed code-only source resolver test cannot approve the current multi-tenant Docker network.

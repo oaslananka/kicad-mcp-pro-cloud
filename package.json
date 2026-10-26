@@ -15,7 +15,8 @@
     "config:check": "node dist/config-check.js",
     "build": "tsc -p tsconfig.build.json",
     "db:migrate": "node dist/migrations-cli.js",
-    "db:prune": "node dist/retention-cli.js"
+    "db:prune": "node dist/retention-cli.js",
+    "ingress:preflight": "node dist/ingress-topology-cli.js"
   },
   "dependencies": {
     "@better-auth/cimd": "1.7.13",
