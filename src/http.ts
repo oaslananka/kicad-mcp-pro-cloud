@@ -107,7 +107,7 @@ async function handleRequest(
         const mode = fields.maxMode;
         const clientId = fields.clientId;
         const enabled = fields.enabled;
-        if (Object.keys(fields).sort().join(",") !== "clientId,enabled,maxMode" ||
+        if (Object.keys(fields).length !== 3 || !["clientId","enabled","maxMode"].every(key => Object.hasOwn(fields,key)) ||
             typeof clientId !== "string" || clientId.length < 1 || clientId.length > 1024 ||
             typeof enabled !== "boolean" ||
             (mode !== "readonly" && mode !== "write" && mode !== "manufacturing")) {
