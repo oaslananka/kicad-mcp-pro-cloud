@@ -244,3 +244,19 @@ test("a revoked signed JWT is rejected at MCP and management edges",async()=>{
     accessAllowed=true;
   }
 });
+
+test("premium public interface and same-origin stylesheet use hardened headers",async()=>{
+  const landing=await fetch(endpoint+"/");
+  assert.equal(landing.status,200);
+  assert.match(landing.headers.get("content-type")??"",/text\/html/);
+  assert.match(landing.headers.get("content-security-policy")??"",/style-src 'self'/);
+  const body=await landing.text();
+  assert.match(body,/Engineering, connected/);
+  assert.match(body,/Account access pending/);
+  assert.doesNotMatch(body,/href="\/sign-in"/);
+  const style=await fetch(endpoint+"/assets/ui.css");
+  assert.equal(style.status,200);
+  assert.match(style.headers.get("content-type")??"",/text\/css/);
+  assert.match(await style.text(),/\.feature-grid/);
+  assert.equal((await fetch(endpoint+"/assets/ui.js")).status,404);
+});

@@ -9,6 +9,8 @@ import { browserResponse } from "./browser.js";
 import { consentResponse } from "./consent.js";
 import { connectionsResponse } from "./connections.js";
 import { oauthProviderResponse } from "./oauth-error.js";
+import { renderLanding } from "./browser-ui.js";
+import { uiCss } from "./ui-styles.js";
 
 const MAX_BODY = 1024 * 1024;
 const noCache = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
@@ -67,6 +69,11 @@ async function handleRequest(
         return;
       }
       const path = new URL(req.url ?? "/", config.publicOrigin).pathname;
+      if (path === "/assets/ui.css" && req.method === "GET") {
+        res.writeHead(200,{...noCache,"Content-Type":"text/css; charset=utf-8"});
+        res.end(uiCss);
+        return;
+      }
       if (identity && (path === "/sign-in" || path === "/account" || path === "/consent" || path === "/connections" || path === "/connections/revoke" || path.startsWith("/auth/start/"))) {
         const method=req.method??"GET";
         const headers=new Headers();
@@ -112,11 +119,12 @@ async function handleRequest(
         return;
       }
       if (path === "/" && req.method === "GET") {
-        res.writeHead(200, {
-          ...noCache, "Content-Type": "text/plain; charset=utf-8",
-          "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'"
+        res.writeHead(200,{...noCache,
+          "Content-Type":"text/html; charset=utf-8",
+          "Referrer-Policy":"no-referrer",
+          "Content-Security-Policy":"default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'"
         });
-        res.end("KiCad MCP Pro Cloud: secure MCP foundation. User registration and local device pairing are not yet available.");
+        res.end(renderLanding(Boolean(identity)));
         return;
       }
       const authPath = path === "/api/auth" || path.startsWith("/api/auth/") ||

@@ -24,7 +24,7 @@ function page(connections:DisplayConnection[],status=200,extraCookie?:string,not
   response.headers.set("Referrer-Policy","no-referrer");
   response.headers.set("X-Content-Type-Options","nosniff");
   response.headers.set("Content-Security-Policy",
-    "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
+    "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'");
   if(extraCookie) response.headers.append("Set-Cookie",extraCookie);
   return response;
 }
