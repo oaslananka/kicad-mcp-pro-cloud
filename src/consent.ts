@@ -1,4 +1,6 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { makeSignature } from "better-auth/crypto";
+import escapeHtml from "escape-html";
 import { verifyOAuthQueryParams } from "@better-auth/oauth-provider";
 import type { BrowserIdentity } from "./browser.js";
 
@@ -10,17 +12,14 @@ const HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Content-Security-Policy": "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"
 };
-function escape(s:string) {
-  return s.replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch] ?? ch));
-}
-function html(message:string, status=200, cookie?:string):Response {
-  const page='<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>KiCad MCP Pro Authorization</title><main><h1>KiCad MCP Pro Authorization</h1>'+message+'</main></html>';
+function renderHtmlPage(safeContentHtml:string, status=200, cookie?:string):Response {
+  const pageHtml='<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>KiCad MCP Pro Authorization</title><main><h1>KiCad MCP Pro Authorization</h1>'+safeContentHtml+'</main></html>';
   const headers=new Headers(HEADERS);
   if(cookie) headers.append("Set-Cookie",cookie);
-  return new Response(page,{status,headers});
+  return new Response(pageHtml,{status,headers});
 }
 function error(status=400):Response {
-  return html("<p>Authorization request could not be verified. Restart the connection in your AI client.</p>",status);
+  return renderHtmlPage("<p>Authorization request could not be verified. Restart the connection in your AI client.</p>",status);
 }
 function queryValid(query:string):boolean {
   const params=new URLSearchParams(query);
@@ -53,8 +52,10 @@ function accessAllowed(query:string, managementClientId:string):boolean {
   const scopes=new Set((params.get("scope")??"").split(/\s+/).filter(Boolean));
   return !scopes.has("projects:manage") || (!!managementClientId && params.get("client_id")===managementClientId);
 }
-function hmac(secret:string,userId:string,query:string,nonce:string,time:number):string {
-  return createHmac("sha256",secret).update(JSON.stringify(["consent-v1",userId,query,nonce,time])).digest("base64url");
+async function consentSignature(secret:string,userId:string,query:string,nonce:string,time:number):Promise<string> {
+  const message=JSON.stringify(["consent-v1",userId,query,nonce,time]);
+  const signature=await makeSignature(message,secret);
+  return Buffer.from(signature,"base64").toString("base64url");
 }
 function cookieName(origin:string):string {
   return origin.startsWith("https://") ? "__Host-kicad-consent" : "kicad-consent";
@@ -69,14 +70,14 @@ function csrfCookie(value:string,origin:string,maxAge:number):string {
   return cookieName(origin)+"="+value+"; Path=/; HttpOnly; SameSite=Strict; Max-Age="+maxAge+
     (origin.startsWith("https://")?"; Secure":"");
 }
-function csrfValid(cookie:string|null,form:string,secret:string,userId:string,query:string):boolean {
+async function csrfValid(cookie:string|null,form:string,secret:string,userId:string,query:string):Promise<boolean> {
   if(!cookie || !form || cookie!==form || form.length>250) return false;
   const parts=form.split(".");
   if(parts.length!==3 || !/^\d{13}$/.test(parts[0]) || !/^[a-zA-Z0-9_-]{22}$/.test(parts[1]) ||
     !/^[a-zA-Z0-9_-]{43}$/.test(parts[2])) return false;
   const time=Number(parts[0]);
   if(time>Date.now()+5000 || Date.now()-time>TTL_MS) return false;
-  const expected=hmac(secret,userId,query,parts[1],time);
+  const expected=await consentSignature(secret,userId,query,parts[1],time);
   const a=Buffer.from(expected);
   const b=Buffer.from(parts[2]);
   return a.length===b.length && timingSafeEqual(a,b);
@@ -102,24 +103,26 @@ async function consentGet(request:Request,identity:BrowserIdentity,origin:string
   const session=await sessionFor(identity,request);
   if(!session?.user?.id) return new Response(null,{status:303,headers:{"Location":"/sign-in?"+query,"Cache-Control":"no-store"}});
   const params=new URLSearchParams(query);
-  const clientId=params.get("client_id")!;
+  const clientId=params.get("client_id");
+  if (!clientId || !identity.$context) return error(403);
   const name=await approvedClient(identity,request,origin,clientId);
   if(!name) return error(403);
-  const {secret}=await identity.$context!;
+  const {secret}=await identity.$context;
   const now=Date.now();
   const nonce=randomBytes(16).toString("base64url");
-  const token=[now,nonce,hmac(secret,session.user.id,query,nonce,now)].join(".");
+  const token=[now,nonce,await consentSignature(secret,session.user.id,query,nonce,now)].join(".");
   const scope=(params.get("scope")??"").split(/\s+/).filter(Boolean);
   const claims=params.get("claims");
-  const claimText=claims ? "<p>Additional claims requested: "+escape(claims)+"</p>" : "";
-  const content="<p>"+escape(name)+" requests access to your account.</p>"+
-    "<p>Requested permissions:</p><ul>"+scope.map(s=>"<li>"+escape(s)+"</li>").join("")+"</ul>"+claimText+
+  const claimsHtml=claims ? "<p>Additional claims requested: "+escapeHtml(claims)+"</p>" : "";
+  const requestedScopeHtml=escapeHtml(scope.join(", "));
+  const contentHtml="<p>"+escapeHtml(name)+" requests access to your account.</p>"+
+    "<p>Requested permissions: "+requestedScopeHtml+"</p>"+claimsHtml+
     "<p>This does not automatically authorize access to any KiCad project. Project grants are separate.</p>"+
-    '<form action="/consent" method="post"><input type="hidden" name="oauth_query" value="'+escape(query)+'">'+
-    '<input type="hidden" name="csrf" value="'+token+'">'+
+    '<form action="/consent" method="post"><input type="hidden" name="oauth_query" value="'+escapeHtml(query)+'">'+
+    '<input type="hidden" name="csrf" value="'+escapeHtml(token)+'">'+
     '<button name="decision" value="deny" type="submit">Deny</button>'+
     '<button name="decision" value="approve" type="submit">Approve</button></form>';
-  return html(content,200,csrfCookie(token,origin,300));
+  return renderHtmlPage(contentHtml,200,csrfCookie(token,origin,300));
 }
 async function consentPost(request:Request,identity:BrowserIdentity,origin:string,managementClientId:string):Promise<Response> {
   if(request.headers.get("origin")!==origin) return error(403);
@@ -134,10 +137,11 @@ async function consentPost(request:Request,identity:BrowserIdentity,origin:strin
   if(!(await verifyQuery(identity,query)) || !accessAllowed(query,managementClientId)) return error(403);
   const session=await sessionFor(identity,request);
   if(!session?.user?.id) return error(401);
-  const clientId=new URLSearchParams(query).get("client_id")!;
+  const clientId=new URLSearchParams(query).get("client_id");
+  if(!clientId || !identity.$context) return error(403);
   if(!(await approvedClient(identity,request,origin,clientId))) return error(403);
-  const {secret}=await identity.$context!;
-  if(!csrfValid(consentCookie(request,origin),fields.get("csrf")??"",secret,session.user.id,query)) return error(403);
+  const {secret}=await identity.$context;
+  if(!(await csrfValid(consentCookie(request,origin),fields.get("csrf")??"",secret,session.user.id,query))) return error(403);
   const reply=await identity.handler(new Request(origin+"/api/auth/oauth2/consent",{
     method:"POST",
     headers:{"Content-Type":"application/json","Origin":origin,"Cookie":request.headers.get("cookie")??""},
