@@ -19,7 +19,7 @@ test("atomic enrollment, owner-scoped revocation and grant disablement",
     scoped.searchParams.set("options","-c search_path="+schema);
     db=new pg.Pool({connectionString:scoped.toString(),max:6});
     for(const file of ["001_inventory.pgsql","002_client_grants.pgsql",
-      "007_device_pairing.pgsql","008_device_credentials.pgsql"]){
+      "007_device_pairing.pgsql","008_device_credentials.pgsql", "009_device_handshake.pgsql"]){
       await db.query(await readFile(new URL("../db/"+file,import.meta.url),"utf8"));
     }
     const keys=generateKeyPairSync("ed25519");
