@@ -8,6 +8,7 @@ import {attachConnectorWebSocket} from "./connector-ws.js";
 import {PgDeviceManagement} from "./device-management.js";
 import {PgPairingReview} from "./pairing-review.js";
 import {PgPairingDeviceAPI} from "./pairing-device-api.js";
+import {trustedCloudflareSource} from "./trusted-ingress.js";
 import { createVerifier } from "./auth.js";
 import { createHttpServer } from "./http.js";
 import { PgGrantManagement } from "./grants.js";
@@ -32,10 +33,15 @@ if(pairingDeviceEnabled&&(!identity||!config.publicOrigin.startsWith("https://")
 }
 const pairingDevice=pairingDeviceEnabled&&connectorPool?
   new PgPairingDeviceAPI(connectorPool,process.env.BETTER_AUTH_SECRET??""):undefined;
+// Enabling either public device surface requires an explicit, fixed
+// cloudflared TCP peer allowlist; no trust-all or unverified header fallback.
+const deviceSource=(wsEnabled||pairingDeviceEnabled)?
+  trustedCloudflareSource(process.env.TRUSTED_CLOUDFLARED_PEERS):undefined;
 const server=createHttpServer(config,inventory,createVerifier(config),inventory,
-  identity,deviceManagement,pairingReview,pairingDevice);
+  identity,deviceManagement,pairingReview,pairingDevice,deviceSource);
 const connectorWs=wsEnabled&&connectorPool?attachConnectorWebSocket(server,{
   publicOrigin:config.publicOrigin,
+  sourceOf:deviceSource!,
   proofs:new PgDeviceHandshakes(connectorPool),
   connections:new BoundConnectorConnections(
     new PgConnectorSessions(connectorPool),

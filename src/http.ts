@@ -13,6 +13,7 @@ import {pairingBrowserResponse} from "./pairing-browser.js";
 import type {PairingReviewPort} from "./pairing-review.js";
 import {handlePairingDeviceRequest} from "./pairing-device-http.js";
 import type {PairingDevicePort} from "./pairing-device-api.js";
+import type {RequestSourceResolver} from "./trusted-ingress.js";
 import { oauthProviderResponse } from "./oauth-error.js";
 import { renderLanding } from "./browser-ui.js";
 import { uiCss } from "./ui-styles.js";
@@ -55,9 +56,9 @@ function validOrigin(req: IncomingMessage, config: Config): boolean {
     (origin === config.publicOrigin || config.allowedOrigins.includes(origin)));
 }
 
-export function createHttpServer(config: Config, inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">,devices?:DeviceManagementPort,pairings?:PairingReviewPort,pairingDevice?:PairingDevicePort): Server {
+export function createHttpServer(config: Config, inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">,devices?:DeviceManagementPort,pairings?:PairingReviewPort,pairingDevice?:PairingDevicePort,deviceSource?:RequestSourceResolver): Server {
   return createServer((req, res) => {
-    void handleRequest(req, res, config, inventory, verify, grants, identity,devices,pairings,pairingDevice).catch(() => {
+    void handleRequest(req, res, config, inventory, verify, grants, identity,devices,pairings,pairingDevice,deviceSource).catch(() => {
       if (!res.headersSent) deny(res, 500, "internal_error");
       else res.end();
     });
@@ -66,7 +67,7 @@ export function createHttpServer(config: Config, inventory: Inventory, verify: V
 
 async function handleRequest(
   req: IncomingMessage, res: ServerResponse, config: Config,
-  inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">,devices?:DeviceManagementPort,pairings?:PairingReviewPort,pairingDevice?:PairingDevicePort
+  inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">,devices?:DeviceManagementPort,pairings?:PairingReviewPort,pairingDevice?:PairingDevicePort,deviceSource?:RequestSourceResolver
 ): Promise<void> {
     try {
       if (!validHost(req, config.publicOrigin) || !validOrigin(req, config)) {
@@ -74,7 +75,8 @@ async function handleRequest(
         return;
       }
       const path = new URL(req.url ?? "/", config.publicOrigin).pathname;
-      if(pairingDevice&&await handlePairingDeviceRequest(req,res,pairingDevice))return;
+      if(pairingDevice&&await handlePairingDeviceRequest(req,res,pairingDevice,
+        deviceSource??(()=>null)))return;
       if (path === "/assets/ui.css" && req.method === "GET") {
         res.writeHead(200,{...noCache,"Content-Type":"text/css; charset=utf-8"});
         res.end(uiCss);

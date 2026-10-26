@@ -82,6 +82,7 @@ test("outbound local WebSocket proves enrolled device identity then binds signed
     const origin="http://127.0.0.1:"+port;
     const attached=attachConnectorWebSocket(server,{
       publicOrigin:origin,
+      sourceOf:()=> "127.0.0.1",
       proofs:new PgDeviceHandshakes(db),
       connections:new BoundConnectorConnections(
         new PgConnectorSessions(db),new PgConnectorReadGate(db))
@@ -149,6 +150,7 @@ test("invalid device signature never starts an authenticated connector session",
     const port=(server.address() as AddressInfo).port;
     const attached=attachConnectorWebSocket(server,{
       publicOrigin:"http://127.0.0.1:"+port,
+      sourceOf:()=> "127.0.0.1",
       proofs:new PgDeviceHandshakes(db),
       connections:new BoundConnectorConnections(
         new PgConnectorSessions(db),new PgConnectorReadGate(db))

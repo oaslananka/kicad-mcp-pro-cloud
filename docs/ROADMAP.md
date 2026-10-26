@@ -162,3 +162,13 @@ or production enrollment is available.
 - [ ] Trusted ingress source-IP/edge rate-limit acceptance and budget cleanup.
 - [ ] Real owner login + native device onboarding and secure local key custody.
 - [ ] Verified production migration/deployment and physical KiCad E2E.
+
+
+## Trusted Cloudflare Tunnel source (not deployed)
+
+- [x] Cloud-only exact TCP peer allowlist + unique Cloudflare source header,
+      IPv6-canonicalized abuse budget key and fail-closed HTTP/WSS behavior.
+- [ ] Verify real tunnel peer topology, header authenticity, isolation and
+      direct-origin bypass prevention in production.
+- [ ] Independently configure distributed edge rate limits and inspect
+      Worker/Transform behavior before enabling any device feature.
