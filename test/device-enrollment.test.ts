@@ -80,6 +80,11 @@ test("atomic enrollment, owner-scoped revocation and grant disablement",
     ]);
     assert.deepEqual(revoked,[true,true]);
     assert.equal(await store.activeDevicePublicKey(owner,success.deviceId),null);
+    // Even if a separate caller erroneously re-enables the device flag,
+    // the irrevocable key cutoff must still deny authentication.
+    await db.query("UPDATE devices SET enabled=true WHERE id=$1",[success.deviceId]);
+    assert.equal(await store.activeDevicePublicKey(owner,success.deviceId),null);
+    await db.query("UPDATE devices SET enabled=false WHERE id=$1",[success.deviceId]);
     const disabled=await db.query(
       "SELECT d.enabled,p.enabled AS project_enabled,g.enabled AS grant_enabled,"+
       "c.revoked_at FROM devices d "+
