@@ -6,6 +6,7 @@ import type { Verifier } from "./auth.js";
 import type { GrantManagement, AccessMode } from "./grants.js";
 import type { Identity } from "./identity.js";
 import { browserResponse } from "./browser.js";
+import { consentResponse } from "./consent.js";
 
 const MAX_BODY = 1024 * 1024;
 const noCache = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
@@ -64,7 +65,7 @@ async function handleRequest(
         return;
       }
       const path = new URL(req.url ?? "/", config.publicOrigin).pathname;
-      if (identity && (path === "/sign-in" || path === "/account" || path.startsWith("/auth/start/"))) {
+      if (identity && (path === "/sign-in" || path === "/account" || path === "/consent" || path.startsWith("/auth/start/"))) {
         const method=req.method??"GET";
         const headers=new Headers();
         for (const [name,value] of Object.entries(req.headers)) {
@@ -73,9 +74,12 @@ async function handleRequest(
           }
         }
         const body=method==="GET" || method==="HEAD" ? undefined : await requestBody(req);
-        const answer=await browserResponse(new Request(config.publicOrigin+(req.url??"/"),{
+        const browserRequest=new Request(config.publicOrigin+(req.url??"/"),{
           method,headers,body:body?.toString("utf8")
-        }),identity,config.publicOrigin);
+        });
+        const answer= path==="/consent"
+          ? await consentResponse(browserRequest,identity,config.publicOrigin,config.managementClientId)
+          : await browserResponse(browserRequest,identity,config.publicOrigin);
         if (answer) {
           const responseHeaders=Object.fromEntries(answer.headers);
           delete responseHeaders["set-cookie"];
