@@ -16,7 +16,7 @@ export function renderConnectionsPage(connections:DisplayConnection[],notice?:st
             <button className="button danger" type="submit">Remove access</button>
           </form>
         </li>)}</ul>}
-      <div className="security-note"><span aria-hidden="true">◇</span>
+      <div className="security-note"><span aria-hidden="true">◇</span>{" "}
         Removing access disables all project grants for the client. Existing JWTs may remain cryptographically valid until expiry, but revoked grants prevent project discovery.
       </div>
       <a className="mini-link" href="/account">← Back to account</a>

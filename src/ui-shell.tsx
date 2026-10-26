@@ -29,7 +29,7 @@ export function renderPage({title,eyebrow,summary,kind,children,navEnabled=true}
     </div></body></html>
   );
 }
-export function Landing({identityEnabled}:{identityEnabled:boolean}){
+export function Landing({identityEnabled}:{readonly identityEnabled:boolean}){
   return <div className="page-stack">
     <div className="feature-grid"><section className="card spotlight">
       <div className="card-kicker"><b>01</b> ENGINEERING WORKSPACE</div>
@@ -54,11 +54,11 @@ export function Landing({identityEnabled}:{identityEnabled:boolean}){
       <div><b>03 /</b><h3>Local-first</h3><p>Device pairing and live KiCad execution are upcoming.</p></div></div>
   </div>;
 }
-export function Notice({message}:{message:string}){
+export function Notice({message}:{readonly message:string}){
   return <section className="card detail-card"><div className="notice-icon">!</div><p>{message}</p>
     <a href="/" className="text-link">Return to overview ↗</a></section>;
 }
-export function SignIn({query}:{query:string}){
+export function SignIn({query}:{readonly query:string}){
   return <section className="card auth-card">
     <div className="panel-heading"><span className="panel-icon" aria-hidden="true">✳</span>
       <div><h2>Welcome to your workspace</h2><p>Choose a trusted identity provider to continue.</p></div></div>
@@ -70,7 +70,7 @@ export function SignIn({query}:{query:string}){
     <div className="security-note"><span aria-hidden="true">◇</span> Sign-in never automatically shares your KiCad designs. Project access is authorized separately.</div>
   </section>;
 }
-export function Account({name}:{name:string}){
+export function Account({name}:{readonly name:string}){
   return <div className="page-stack"><section className="card detail-card">
     <div className="account-banner"><span className="avatar">{name.trim().slice(0,1).toUpperCase()||"U"}</span>
       <div><div className="card-kicker">SIGNED IN WORKSPACE</div><h2>Welcome back, {name}</h2>

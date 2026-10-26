@@ -20,7 +20,7 @@ export function renderConsentPage(view:ConsentView):string {
       <p className="field-help">This client requests access to your account with these permissions:</p>
       <ul className="scope-list">{Array.from(new Set(view.scopes)).map(scope=><li key={scope}>{scope}</li>)}</ul>
       {view.claims?<p className="field-help">Additional claims requested: {view.claims}</p>:null}
-      <div className="security-note"><span aria-hidden="true">◇</span>
+      <div className="security-note"><span aria-hidden="true">◇</span>{" "}
         This does not automatically authorize access to any KiCad project. Project grants are separate.
       </div>
       <form action="/consent" method="post">
