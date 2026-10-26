@@ -8,6 +8,7 @@ import type { Identity } from "./identity.js";
 import { browserResponse } from "./browser.js";
 import { consentResponse } from "./consent.js";
 import { connectionsResponse } from "./connections.js";
+import { oauthProviderResponse } from "./oauth-error.js";
 
 const MAX_BODY = 1024 * 1024;
 const noCache = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
@@ -135,7 +136,7 @@ async function handleRequest(
         const forwarded=new Request(config.publicOrigin + (req.url ?? "/"),{
           method,headers,body:payload?.toString("utf8")
         });
-        const reply=await identity.handler(forwarded);
+        const reply=await oauthProviderResponse(forwarded,request=>identity.handler(request));
         const outgoing=Object.fromEntries(reply.headers);
         delete outgoing["set-cookie"];
         delete outgoing["content-length"];
