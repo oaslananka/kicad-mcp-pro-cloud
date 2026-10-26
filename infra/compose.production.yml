@@ -52,7 +52,7 @@ services:
         - -e
         - >-
           require('node:http').get({hostname:'127.0.0.1',port:8787,
-          path:'/health',headers:{host:new URL(process.env.PUBLIC_ORIGIN).host},
+          path:'/health',headers:{host:new URL(process.env.PUBLIC_ORIGIN).host}},
           r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))
       interval: 15s
       timeout: 5s

@@ -31,6 +31,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - name: Validate production Compose topology and healthcheck
+        run: node scripts/check-production-compose.mjs
       - name: Build secret-free OCI image
         run: docker build -t kicad-mcp-pro-cloud:ci .
       - name: Prove ephemeral PostgreSQL backup and restore
