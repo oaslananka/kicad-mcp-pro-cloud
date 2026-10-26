@@ -63,7 +63,7 @@ assert_eq() {
 echo 'Restore drill: applying reviewed database schema in source fixture'
 cli "$source" --status >/dev/null
 cli "$source" --apply >/dev/null
-assert_eq "$(sql "$source" 'SELECT count(*) FROM schema_migrations')" "7" "source migration count"
+assert_eq "$(sql "$source" 'SELECT count(*) FROM schema_migrations')" "8" "source migration count"
 
 # Only synthetic metadata; no physical KiCad paths, files or user credentials.
 sql "$source" "INSERT INTO devices(id,owner_sub,alias,enabled) VALUES
@@ -96,7 +96,7 @@ docker exec "$source" pg_dump -Fc -U fixture -d cloud_fixture \
 echo 'Restore drill: checking migrations, permissions and authorization fences'
 cli "$target" --status >/dev/null
 cli "$target" --apply >/dev/null
-assert_eq "$(sql "$target" 'SELECT count(*) FROM schema_migrations')" "7" "restored migration ledger"
+assert_eq "$(sql "$target" 'SELECT count(*) FROM schema_migrations')" "8" "restored migration ledger"
 assert_eq "$(sql "$target" "SELECT count(*) FROM devices WHERE owner_sub='fixture-owner'")" "1" "device metadata"
 assert_eq "$(sql "$target" "SELECT count(*) FROM projects WHERE owner_sub='fixture-owner'")" "1" "project metadata"
 assert_eq "$(sql "$target" "SELECT count(*) FROM project_client_grants WHERE owner_sub='fixture-owner' AND client_id='fixture-client' AND enabled")" "1" "client grant metadata"
@@ -117,4 +117,4 @@ source_ledger="$(sql "$source" "SELECT md5(string_agg(version || ':' || checksum
 target_ledger="$(sql "$target" "SELECT md5(string_agg(version || ':' || checksum, '|' ORDER BY version)) FROM schema_migrations")"
 assert_eq "$(sql "$target" 'SELECT count(*) FROM pairing_challenges')" "1" "restored pairing metadata"
 assert_eq "$target_ledger" "$source_ledger" "restored checksum ledger"
-echo 'Restore drill passed: all seven migrations, pairing metadata, cutoff policy and triggers recovered'
+echo 'Restore drill passed: all eight migrations, pairing metadata, cutoff policy and triggers recovered'

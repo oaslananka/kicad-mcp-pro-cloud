@@ -18,7 +18,10 @@ test("isolated PostgreSQL pairing transitions serialize competing workers",
     scoped.searchParams.set("options","-c search_path="+schema);
     pool=new pg.Pool({connectionString:scoped.toString(),max:6});
     const sql=await readFile(new URL("../db/007_device_pairing.pgsql",import.meta.url),"utf8");
+    await pool.query(await readFile(new URL("../db/001_inventory.pgsql",import.meta.url),"utf8"));
+    await pool.query(await readFile(new URL("../db/002_client_grants.pgsql",import.meta.url),"utf8"));
     await pool.query(sql);
+    await pool.query(await readFile(new URL("../db/008_device_credentials.pgsql",import.meta.url),"utf8"));
     const pair=generateKeyPairSync("ed25519");
     const der=pair.publicKey.export({format:"der",type:"spki"}) as Buffer;
     const store=new PgPairingChallenges(pool,randomBytes(32));
@@ -29,7 +32,7 @@ test("isolated PostgreSQL pairing transitions serialize competing workers",
     assert.equal(JSON.stringify(raw).includes(first.deviceCode),false);
     assert.equal(JSON.stringify(raw).includes(first.userCode),false);
     const proof=sign(null,redemptionProof(first.id,first.deviceCode),pair.privateKey);
-    assert.equal((await store.redeem(first.id,first.deviceCode,proof)).kind,"unavailable");
+    assert.equal((await store.enroll(first.id,first.deviceCode,proof)).kind,"unavailable");
 
     const approvals=await Promise.all([
       store.review(first.id,"owner-1",first.userCode,"approve"),
@@ -40,13 +43,19 @@ test("isolated PostgreSQL pairing transitions serialize competing workers",
     assert.ok(["owner-1","owner-2"].includes(owner));
 
     const redeemed=await Promise.all([
-      store.redeem(first.id,first.deviceCode,proof),
-      store.redeem(first.id,first.deviceCode,proof)
+      store.enroll(first.id,first.deviceCode,proof),
+      store.enroll(first.id,first.deviceCode,proof)
     ]);
-    assert.deepEqual(redeemed.map(r=>r.kind).sort(),["redeemed","unavailable"]);
-    assert.equal(redeemed.find(r=>r.kind==="redeemed")?.ownerSub,owner);
+    assert.deepEqual(redeemed.map(r=>r.kind).sort(),["enrolled","unavailable"]);
+    assert.equal(redeemed.find(r=>r.kind==="enrolled")?.ownerSub,owner);
     assert.equal((await pool.query("SELECT state FROM pairing_challenges WHERE id=$1",[first.id])).rows[0].state,"consumed");
-    assert.equal((await store.redeem(first.id,first.deviceCode,proof)).kind,"unavailable");
+    const linked=await pool.query(
+      "SELECT d.enabled,c.pairing_challenge_id FROM devices d "+
+      "JOIN device_credentials c ON c.device_id=d.id WHERE c.pairing_challenge_id=$1",
+      [first.id]);
+    assert.equal(linked.rows.length,1);
+    assert.equal(linked.rows[0].enabled,false);
+    assert.equal((await store.enroll(first.id,first.deviceCode,proof)).kind,"unavailable");
 
     const wrong=await store.issue("Locked PC",der);
     const results=await Promise.all(Array.from({length:MAX_USER_CODE_ATTEMPTS},()=>(
@@ -69,7 +78,7 @@ test("isolated PostgreSQL pairing transitions serialize competing workers",
       "expires_at=clock_timestamp()-interval '1 second' WHERE id=$1",[expired.id]);
     assert.equal(await store.review(expired.id,"owner-1",expired.userCode,"approve"),"unavailable");
     assert.equal((await pool.query("SELECT state FROM pairing_challenges WHERE id=$1",[expired.id])).rows[0].state,"expired");
-    assert.equal((await store.redeem("not-a-uuid",first.deviceCode,proof)).kind,"unavailable");
+    assert.equal((await store.enroll("not-a-uuid",first.deviceCode,proof)).kind,"unavailable");
 
     // SQL constraints must not allow state/owner or attempt-counter corruption.
     await assert.rejects(pool.query("UPDATE pairing_challenges SET state='approved' WHERE id=$1",[wrong.id]));
