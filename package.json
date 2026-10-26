@@ -18,11 +18,11 @@
     "db:prune": "node dist/retention-cli.js"
   },
   "dependencies": {
-    "@better-auth/cimd": "1.7.13",
-    "@better-auth/mcp": "1.7.13",
-    "@better-auth/oauth-provider": "1.7.13",
+    "@better-auth/cimd": "1.7.14",
+    "@better-auth/mcp": "1.7.14",
+    "@better-auth/oauth-provider": "1.7.14",
     "@modelcontextprotocol/server": "2.4.0",
-    "better-auth": "1.7.13",
+    "better-auth": "1.7.14",
     "jose": "^6.1.0",
     "pg": "^8.16.3",
     "react": "19.3.1",
