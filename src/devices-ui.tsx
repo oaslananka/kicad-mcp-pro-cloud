@@ -28,6 +28,7 @@ export function renderDevicesPage(
           </li>)}</ul>}
       <div className="security-note">Revoked keys cannot authenticate, even if a device flag is later changed.
         No KiCad project files or paths are stored in Cloud.</div>
+      <div className="action-row"><a className="button secondary" href="/devices/pairing">Review device pairing ↗</a></div>
       <a className="mini-link" href="/account">← Back to account</a>
     </section>
   });

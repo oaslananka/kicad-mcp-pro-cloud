@@ -6,6 +6,7 @@ import {PgConnectorReadGate} from "./connector-read-gate.js";
 import {BoundConnectorConnections} from "./connector-transport-binding.js";
 import {attachConnectorWebSocket} from "./connector-ws.js";
 import {PgDeviceManagement} from "./device-management.js";
+import {PgPairingReview} from "./pairing-review.js";
 import { createVerifier } from "./auth.js";
 import { createHttpServer } from "./http.js";
 import { PgGrantManagement } from "./grants.js";
@@ -22,7 +23,9 @@ if(wsEnabled&&!config.publicOrigin.startsWith("https://")){
 }
 const connectorPool=(wsEnabled||Boolean(identity))?new Pool({connectionString:config.databaseUrl}):null;
 const deviceManagement=identity&&connectorPool?new PgDeviceManagement(connectorPool):undefined;
-const server=createHttpServer(config,inventory,createVerifier(config),inventory,identity,deviceManagement);
+const pairingReview=identity&&connectorPool?
+  new PgPairingReview(connectorPool,process.env.BETTER_AUTH_SECRET??""):undefined;
+const server=createHttpServer(config,inventory,createVerifier(config),inventory,identity,deviceManagement,pairingReview);
 const connectorWs=wsEnabled&&connectorPool?attachConnectorWebSocket(server,{
   publicOrigin:config.publicOrigin,
   proofs:new PgDeviceHandshakes(connectorPool),
