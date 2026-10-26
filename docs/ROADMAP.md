@@ -137,3 +137,15 @@ No overall DoD is considered met by the above partial implementation.
 
 This increment makes no claim that actual local KiCad devices are linked
 or production enrollment is available.
+
+
+## Browser pairing review and abuse controls (pre-enrollment)
+
+- [x] Authenticated, same-origin browser review for existing challenges;
+      5-minute session-bound CSRF state and exact form fields.
+- [x] PostgreSQL owner budget: ten attempts per five minutes, serialized
+      across replicas, including unknown challenge IDs, plus five attempts
+      per challenge.
+- [ ] Trusted, rate-limited device challenge issuance and redemption transport.
+- [ ] Real OAuth provider/AI-host acceptance, production migration,
+      physical device compatibility, rollout approval.
