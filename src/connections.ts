@@ -25,10 +25,10 @@ function readCookie(request:Request,origin:string):string|null {
     .find(v=>v.startsWith(name+"="))?.slice(name.length+1)??null;
 }
 function page(connections:DisplayConnection[],status=200,extraCookie?:string,notice?:string):Response {
-  return new Response(renderConnectionsPage(connections,notice),{
-    status,
-    headers:{...htmlHeaders,...(extraCookie?{"Set-Cookie":extraCookie}:{})}
-  });
+  const response = new Response(renderConnectionsPage(connections,notice),{status});
+  for(const [name,value] of Object.entries(htmlHeaders)) response.headers.set(name,value);
+  if(extraCookie) response.headers.append("Set-Cookie",extraCookie);
+  return response;
 }
 function failure(code:number):Response {
   return page([],code,undefined,"Access could not be changed. Please reload your connections.");
