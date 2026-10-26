@@ -20,7 +20,7 @@ async function loadMigrations():Promise<Migration[]> {
     if(!Number.isSafeInteger(version) || version!==index+1){
       throw new Error("Migration manifest version order is invalid");
     }
-    const sql=(await readFile(new URL("../db/"+file,import.meta.url),"utf8")).replaceAll(String.fromCharCode(13,10),String.fromCharCode(10));
+    const sql=(await readFile(new URL("../db/"+file,import.meta.url),"utf8")).replaceAll(String.fromCodePoint(13,10),String.fromCodePoint(10));
     if(!sql.trim()) throw new Error("Empty database migration in manifest");
     return {version,file,sql,checksum:createHash("sha256").update(sql).digest("hex")};
   }));
