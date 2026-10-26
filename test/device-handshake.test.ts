@@ -126,6 +126,31 @@ test("PostgreSQL handshake single-use, expiry, lockout, owner scope and revocati
     const raceStatus=(await db.query(
       "SELECT status FROM device_handshake_challenges WHERE id=$1",[race.challengeId])).rows[0].status;
     assert.ok(["verified","revoked"].includes(raceStatus));
+
+    // Deterministic deny-after-revoke, including a formerly valid nonce
+    // and a correct signature, on a separate enrolled device.
+    const newKeys=generateKeyPairSync("ed25519");
+    const nextKey=newKeys.publicKey.export({format:"der",type:"spki"}) as Buffer;
+    const nextPairing=await pair.issue("Revocation Check",nextKey);
+    assert.equal(await pair.review(nextPairing.id,owner,nextPairing.userCode,"approve"),"approved");
+    const nextEnrollment=await pair.enroll(
+      nextPairing.id,nextPairing.deviceCode,
+      sign(null,redemptionProof(nextPairing.id,nextPairing.deviceCode),newKeys.privateKey));
+    assert.equal(nextEnrollment.kind,"enrolled");
+    if(nextEnrollment.kind!=="enrolled")return;
+    await db.query("UPDATE devices SET enabled=true WHERE id=$1",[nextEnrollment.deviceId]);
+    const outstanding=await handshakeA.issue(owner,nextEnrollment.deviceId);
+    assert.equal(outstanding.kind,"issued");
+    if(outstanding.kind!=="issued")return;
+    const validOutstanding=sign(null,deviceHandshakeProof(
+      outstanding.challengeId,nextEnrollment.deviceId,outstanding.nonce),newKeys.privateKey);
+    assert.equal(await pair.revokeDevice(owner,nextEnrollment.deviceId),true);
+    const status=(await db.query(
+      "SELECT status FROM device_handshake_challenges WHERE id=$1",
+      [outstanding.challengeId])).rows[0]?.status;
+    assert.equal(status,"revoked");
+    assert.equal((await handshakeA.verify(owner,nextEnrollment.deviceId,
+      outstanding.challengeId,outstanding.nonce,validOutstanding)).kind,"unavailable");
   }finally{
     await db?.end();
     await root.query('DROP SCHEMA IF EXISTS "'+schema+'" CASCADE');
