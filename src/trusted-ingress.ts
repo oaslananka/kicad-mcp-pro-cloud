@@ -68,3 +68,47 @@ export function trustedCloudflareSource(
     return client;
   };
 }
+
+/**
+ * Owner-only private SSH/Tailscale ingress. The approved SSH server forwards
+ * through the VPS host into Docker. Only that exact host-side TCP peer is
+ * recognized; no forwarding headers are trusted. This identifies a single
+ * source rate bucket, NOT a device/user or a substitute for Ed25519 pairing.
+ *
+ * Requires separate acceptance of reverse forwarding, owner SSH identity,
+ * local-only tunnel bind and Docker host trust; enabling this with arbitrary
+ * host processes or shared bridge access is not an accepted deployment.
+ */
+export function trustedPrivateSshSource(rawTrustedPeer:string|undefined):RequestSourceResolver{
+  if(!rawTrustedPeer)throw new Error("TRUSTED_PRIVATE_SSH_PEER_REQUIRED");
+  const peer=ipAddress(rawTrustedPeer);
+  // A Docker bridge gateway must be a pinned private IPv4 address. Forbid
+  // loopback/wildcards/CIDR/list entries and any public/global peer.
+  if(!peer||rawTrustedPeer!==peer||isIP(peer)!==4||!/(?:^10\.|^192\.168\.|^172\.(?:1[6-9]|2[0-9]|3[01])\.)/.test(peer))
+    throw new Error("INVALID_TRUSTED_PRIVATE_SSH_PEER");
+  return req=>{
+    if(ipAddress(req.socket.remoteAddress??"")!==peer)return null;
+    // The host-side SSH forwarder does not emit HTTP forwarding headers.
+    // Reject all such claims even though the source TCP peer is allowed.
+    for(let i=0;i<req.rawHeaders.length;i+=2){
+      if(["cf-connecting-ip","x-forwarded-for","forwarded","x-real-ip",
+        "tailscale-user-login","tailscale-user-name"].includes(req.rawHeaders[i]?.toLowerCase()??""))
+        return null;
+    }
+    return peer;
+  };
+}
+
+/** Choose exactly one operator-accepted device ingress; never merge trust. */
+export function configuredDeviceSource(env:NodeJS.ProcessEnv):RequestSourceResolver{
+  const mode=env.CONNECTOR_INGRESS_MODE??"cloudflare";
+  if(mode==="private_ssh"){
+    if(env.TRUSTED_CLOUDFLARED_PEERS)throw new Error("AMBIGUOUS_CONNECTOR_INGRESS_TRUST");
+    return trustedPrivateSshSource(env.TRUSTED_PRIVATE_SSH_PEER);
+  }
+  if(mode==="cloudflare"){
+    if(env.TRUSTED_PRIVATE_SSH_PEER)throw new Error("AMBIGUOUS_CONNECTOR_INGRESS_TRUST");
+    return trustedCloudflareSource(env.TRUSTED_CLOUDFLARED_PEERS);
+  }
+  throw new Error("INVALID_CONNECTOR_INGRESS_MODE");
+}

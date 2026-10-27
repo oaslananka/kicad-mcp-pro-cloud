@@ -62,4 +62,17 @@ device signatures; no KiCad remote command dispatcher is exposed.
 No proxy/container addresses or sensitive operational network layout are
 committed here; discover them through authorized read-only Ops inspection.
 
-The read-only Docker isolation and fixed-peer release preflight is documented in [Ingress topology acceptance](INGRESS-TOPOLOGY-ACCEPTANCE.md). A passed code-only source resolver test cannot approve the current multi-tenant Docker network.
+The read-only Docker isolation and fixed-peer release preflight is documented in [Ingress topology acceptance](INGRESS-TOPOLOGY-ACCEPTANCE.md).
+
+## Separate owner-only private pilot (not activated)
+
+A one-shot encrypted Tailscale/SSH reverse-forward has now been verified
+between two owner-operated devices: the existing `/health` succeeds and the
+disabled device challenge/WS paths still return 404. The opt-in
+`private_ssh` source policy is **mutually exclusive** with the cloudflared
+policy, recognizes only a single exact trusted Docker-host TCP peer and
+rejects all proxy-asserted source headers. This is **not** a general public
+edge replacement; SSH principal and host gateway isolation require explicit
+acceptance before enabling the device flags. See
+[Private tailnet connector candidate](PRIVATE-TAILNET-CONNECTOR-CANDIDATE.md).
+ A passed code-only source resolver test cannot approve the current multi-tenant Docker network.

@@ -8,7 +8,7 @@ import {createHttpServer} from "../src/http.js";
 import type {Config} from "../src/config.js";
 import type {Inventory} from "../src/store.js";
 import type {PairingDevicePort} from "../src/pairing-device-api.js";
-import {trustedCloudflareSource} from "../src/trusted-ingress.js";
+import {trustedCloudflareSource,trustedPrivateSshSource,configuredDeviceSource} from "../src/trusted-ingress.js";
 import {attachConnectorWebSocket} from "../src/connector-ws.js";
 import {BoundConnectorConnections} from "../src/connector-transport-binding.js";
 
@@ -151,4 +151,62 @@ test("WebSocket Upgrade rejects untrusted peer and missing CF-Connecting-IP",asy
     await attach.close();
     await l.close();
   }
+});
+
+test("private owner SSH ingress pins only the Docker gateway without forwarded claims",()=>{
+  assert.throws(()=>trustedPrivateSshSource(undefined),/REQUIRED/);
+  for(const bad of ["","*","0.0.0.0","::1","127.0.0.1","8.8.8.8",
+    "172.15.1.1","172.32.1.1","10.1.1.2/32","10.1.1.2,10.1.1.3",
+    "invalid"," 172.20.0.1","169.254.1.1","::ffff:172.20.0.1"]){
+    assert.throws(()=>trustedPrivateSshSource(bad),bad);
+  }
+  const resolve=trustedPrivateSshSource("172.21.0.1");
+  assert.equal(resolve(incoming("172.21.0.1",[])),"172.21.0.1");
+  assert.equal(resolve(incoming("::ffff:172.21.0.1",[])),"172.21.0.1");
+  assert.equal(resolve(incoming("172.21.0.2",[])),null);
+  assert.equal(resolve(incoming("127.0.0.1",[])),null);
+  for(const name of ["CF-Connecting-IP","X-Forwarded-For","Forwarded",
+    "X-Real-IP","Tailscale-User-Login","Tailscale-User-Name"]){
+    assert.equal(resolve(incoming("172.21.0.1",[[name,"198.51.100.70"]])),null,name);
+  }
+});
+
+test("private SSH source is enforced by pairing HTTP even without CF headers",async()=>{
+  const seen:string[]=[];
+  const api:PairingDevicePort={
+    issue:async source=>{seen.push(source);return {kind:"unavailable"};},
+    enroll:async()=>({kind:"unavailable"})
+  };
+  const resolver=trustedPrivateSshSource("172.21.0.1");
+  const der=generateKeyPairSync("ed25519").publicKey.export({format:"der",type:"spki"}) as Buffer;
+  const body=JSON.stringify({alias:"Owner device",publicKeyDer:der.toString("base64")});
+  const server=createHttpServer(config,inventory,async()=>{throw Error("unused");},
+    undefined,undefined,undefined,undefined,api,resolver);
+  const running=await listen(server);
+  try{
+    const response=await fetch(running.base+"/api/v1/pairing/device/challenge",{
+      method:"POST",headers:{"content-type":"application/json"},body
+    });
+    assert.equal(response.status,403); // listening on loopback, not gateway peer
+    assert.deepEqual(seen,[]);
+  }finally{await running.close();}
+});
+
+test("private mode must be explicit, with exactly one pinned trust source",()=>{
+  assert.throws(()=>configuredDeviceSource({}),/TRUSTED_CLOUDFLARED_PEERS_REQUIRED/);
+  assert.throws(()=>configuredDeviceSource({CONNECTOR_INGRESS_MODE:"private_ssh"}),
+    /TRUSTED_PRIVATE_SSH_PEER_REQUIRED/);
+  assert.throws(()=>configuredDeviceSource({CONNECTOR_INGRESS_MODE:"unknown",TRUSTED_PRIVATE_SSH_PEER:"172.21.0.1"}),
+    /INVALID_CONNECTOR_INGRESS_MODE/);
+  assert.throws(()=>configuredDeviceSource({CONNECTOR_INGRESS_MODE:"private_ssh",
+    TRUSTED_PRIVATE_SSH_PEER:"172.21.0.1",TRUSTED_CLOUDFLARED_PEERS:"172.21.0.2"}),
+    /AMBIGUOUS_CONNECTOR_INGRESS_TRUST/);
+  assert.throws(()=>configuredDeviceSource({TRUSTED_PRIVATE_SSH_PEER:"172.21.0.1",
+    TRUSTED_CLOUDFLARED_PEERS:"172.21.0.2"}),/AMBIGUOUS_CONNECTOR_INGRESS_TRUST/);
+  const legacy=configuredDeviceSource({TRUSTED_CLOUDFLARED_PEERS:"172.21.0.2"});
+  assert.equal(legacy(incoming("172.21.0.2",[["CF-Connecting-IP","198.51.100.70"]])),"198.51.100.70");
+  const privateMode=configuredDeviceSource({CONNECTOR_INGRESS_MODE:"private_ssh",
+    TRUSTED_PRIVATE_SSH_PEER:"172.21.0.1"});
+  assert.equal(privateMode(incoming("172.21.0.1",[])),"172.21.0.1");
+  assert.equal(privateMode(incoming("172.21.0.2",[["CF-Connecting-IP","198.51.100.70"]])),null);
 });
