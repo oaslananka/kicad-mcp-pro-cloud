@@ -178,3 +178,17 @@ or production enrollment is available.
 - [x] Cloud-only read-only Docker topology verifier and adversarial tests for private, pinned, two-container ingress and no app port publishing.
 - [ ] Controlled non-disruptive migration from shared tunnel bridge to an isolated Cloud-specific ingress path.
 - [ ] Cloudflare edge WAF rules, source header authenticity, WebSocket real-user acceptance and rollback evidence.
+
+
+## Verified Cloudflare live edge acceptance (read-only)
+
+- [x] Audit current KiCad hostname DNS, shared Tunnel route, zone plan and
+      WAF rule inventory without touching other Cloudflare apps.
+- [x] Offline, non-secret, fail-closed edge acceptance contract with
+      adversarial tests on DNS, dedicated routing, WAF rule capacity,
+      endpoint method/path protections and unverified header provenance.
+- [ ] Preserve current Free-tier leaked-credential WAF rule and obtain
+      independently verified plan/rule capacity before adding KiCad edge
+      rate protection. Do not replace unrelated security rules.
+- [ ] Deploy and accept KiCad-only Tunnel, isolated origin, route and
+      distributed endpoint rate limits with tested recovery/rollback.
