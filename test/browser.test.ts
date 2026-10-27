@@ -26,6 +26,25 @@ test("first-party sign-in is available only with builtin identity",async()=>{
   assert.equal(invalid?.status,400);
 });
 
+test("UTM-only chat referral strips tracking without weakening OAuth verification",async()=>{
+  const referral=await browserResponse(
+    new Request(origin+"/sign-in?utm_source=chatgpt.com"),mock(),origin);
+  assert.equal(referral?.status,303);
+  assert.equal(referral?.headers.get("location"),"/sign-in");
+  assert.equal(referral?.headers.get("cache-control"),"no-store");
+
+  for(const query of [
+    "?utm_source=chatgpt.com&client_id=attacker",
+    "?client_id=attacker&utm_source=chatgpt.com",
+    "?utm_source=chatgpt.com&state=fake",
+    "?utm_invalid=chatgpt.com",
+    "?utm_source="+("x".repeat(1100))
+  ]){
+    const result=await browserResponse(new Request(origin+"/sign-in"+query),mock(),origin);
+    assert.equal(result?.status,400,query.slice(0,100));
+  }
+});
+
 test("GitHub-only identity hides and denies unconfigured Google login",async()=>{
   const identity=createIdentity({
     publicOrigin:origin,audience:origin+"/mcp",
