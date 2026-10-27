@@ -91,25 +91,22 @@ export async function handleCandidate(request,env,forward){
 }
 // Only hardcoded, approved destination URLs ever reach fetch(). A client
 // cannot select another scheme/host/port/path through its request URL.
-async function forwardKnownRoute(request){
-  try{
-    const path=new URL(request.url).pathname;
-    switch(path){
+function forwardKnownRoute(request){
+  // This function deliberately returns a Promise (or throws synchronously).
+  // handleCandidate owns the single await + fail-closed exception boundary.
+  const path=new URL(request.url).pathname;
+  switch(path){
     case "/api/v1/pairing/device/challenge":
-      return await fetch(new Request(
+      return fetch(new Request(
         "https://kicad-mcp-pro.oaslananka.dev/api/v1/pairing/device/challenge",request));
     case "/api/v1/pairing/device/redeem":
-      return await fetch(new Request(
+      return fetch(new Request(
         "https://kicad-mcp-pro.oaslananka.dev/api/v1/pairing/device/redeem",request));
     case "/api/v1/connector/ws":
-      return await fetch(new Request(
+      return fetch(new Request(
         "https://kicad-mcp-pro.oaslananka.dev/api/v1/connector/ws",request));
     default:
       return deny(404);
-    }
-  }catch{
-    // A failed upstream fetch never bypasses the protective gateway.
-    return deny(503);
   }
 }
 export default {
