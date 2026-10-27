@@ -45,7 +45,7 @@ test("fail closed on unsafe or inconsistent deployment config",()=>{
   }
 });
 test("production compose accepts configurable external network and forwards management config",()=>{
-  const output=execFileSync("docker",["compose","-f","infra/compose.production.yml","config","--format","json"],
+  const output=execFileSync("/usr/bin/docker",["compose","-f","infra/compose.production.yml","config","--format","json"],
     {cwd:root,env:{...base,MANAGEMENT_CLIENT_ID:"owner-ui",ALLOWED_ORIGINS:base.PUBLIC_ORIGIN},encoding:"utf8"});
   const config=JSON.parse(output);
   assert.equal(config.networks.tunnel.name,base.KICAD_TUNNEL_NETWORK);
@@ -55,7 +55,7 @@ test("production compose accepts configurable external network and forwards mana
   assert.equal(config.services.app.ports,undefined);
 });
 test("managed Cloudflare tunnel is opt-in, bound to dedicated network and publishes no ports",()=>{
-  const output=execFileSync("docker",["compose","-f","infra/compose.cloudflare.yml","config","--format","json"],
+  const output=execFileSync("/usr/bin/docker",["compose","-f","infra/compose.cloudflare.yml","config","--format","json"],
     {cwd:root,env:base,encoding:"utf8"});
   const config=JSON.parse(output);
   assert.equal(config.networks.ingress.external,true);
@@ -71,7 +71,7 @@ test("scoped VPS mode refuses inherited Doppler selection and never echoes secre
     {DOPPLER_PROJECT:"wrong-project"},
     {DOPPLER_CONFIG:"wrong-config"}
   ]) {
-    const result=spawnSync("bash",["scripts/doppler-runtime.sh","node","--version"],
+    const result=spawnSync("/usr/bin/bash",["scripts/doppler-runtime.sh","node","--version"],
       {cwd:root,env:{KICAD_DOPPLER_SCOPED:"true",...entry},encoding:"utf8"});
     assert.equal(result.status,2);
     assert.match(result.stderr,/Ambiguous Doppler selection/);
@@ -79,7 +79,7 @@ test("scoped VPS mode refuses inherited Doppler selection and never echoes secre
   }
 });
 test("token enrollment only runs with an interactive terminal",()=>{
-  const result=spawnSync("bash",["scripts/setup-vps-doppler.sh","test-project","test-config"],
+  const result=spawnSync("/usr/bin/bash",["scripts/setup-vps-doppler.sh","test-project","test-config"],
     {cwd:root,env:{},encoding:"utf8",input:"synthetic-token-do-not-use\n"});
   assert.equal(result.status,2);
   assert.match(result.stderr,/Interactive owner TTY required/);
