@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {createServer} from "node:http";
 import {chromium} from "playwright";
 import {renderLanding,renderAccount,renderSignIn} from "../dist/browser-ui.js";
 import {renderConnectionsPage} from "../dist/connections-ui.js";
@@ -18,14 +19,30 @@ const pages={
     scopes:["openid","offline_access","projects:read"],query:"test",csrf:"test-csrf"}),
   signIn:renderSignIn("",["github"])
 };
+// Serve static React-rendered fixture pages over loopback HTTP, as in production.
+// Avoid injecting or constructing HTML inside the browser runtime.
+const server=createServer((req,res)=>{
+  const path=new URL(req.url??"/","http://127.0.0.1").pathname;
+  if(path==="/assets/ui.css"){
+    res.writeHead(200,{"Content-Type":"text/css; charset=utf-8"});
+    res.end(uiCss);return;
+  }
+  const kind=path.slice(1);
+  if(!Object.hasOwn(pages,kind)){
+    res.writeHead(404);res.end();return;
+  }
+  res.writeHead(200,{"Content-Type":"text/html; charset=utf-8"});
+  res.end(pages[kind]);
+});
+await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
+const base=`http://127.0.0.1:${server.address().port}`;
 const browser=await chromium.launch({headless:true,...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{})});
 try{
   for(const [width,height] of [[1440,900],[768,960],[390,844]]){
     const page=await browser.newPage({viewport:{width,height},deviceScaleFactor:1});
-    for(const [kind,html] of Object.entries(pages)){
-      await page.setContent(html);
-      // Add the first-party CSS separately; never interpolate it into HTML.
-      await page.addStyleTag({content:uiCss});
+    for(const kind of Object.keys(pages)){
+      const response=await page.goto(`${base}/${kind}`,{waitUntil:"load"});
+      assert.equal(response?.status(),200);
       const metrics=await page.evaluate(()=>({
         fullWidth:document.documentElement.scrollWidth,
         viewport:window.innerWidth,
@@ -59,4 +76,7 @@ try{
     }
     await page.close();
   }
-} finally {await browser.close();}
+} finally {
+  await browser.close();
+  await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+}
