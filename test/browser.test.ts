@@ -22,6 +22,8 @@ test("first-party sign-in is available only with builtin identity",async()=>{
   const page=await browserResponse(new Request(origin+"/sign-in"),mock(),origin);
   assert.equal(page?.status,200);
   assert.match(await page!.text(),/Continue with Google/);
+  assert.equal(page?.headers.get("referrer-policy"),"same-origin",
+    "Native browser form POST must not convert its Origin to null");
   const invalid=await browserResponse(new Request(origin+"/sign-in?client_id=attacker"),mock(),origin);
   assert.equal(invalid?.status,400);
 });
