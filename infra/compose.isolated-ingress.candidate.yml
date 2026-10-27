@@ -1,0 +1,55 @@
+# REVIEW-ONLY CANDIDATE: never pass this overlay to production compose up
+# until isolated Tunnel, Cloudflare route, backup and rollback are accepted.
+# Requires Docker Compose with !override support (2.24.4+).
+services:
+  app:
+    # Removes, rather than merges, the old ops_internal attachment.
+    networks: !override
+      database: {}
+      ingress_private:
+        ipv4_address: ${KICAD_INGRESS_APP_IP:?Preapproved application ingress IPv4}
+  cloudflared_kicad:
+    image: cloudflare/cloudflared:2026.10.0
+    restart: unless-stopped
+    # Separate, remotely managed Tunnel exclusively for KiCad Cloud.
+    # Do NOT reuse the shared ops-cloudflared token or change its routes.
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token-file
+      - /run/secrets/kicad_tunnel_token
+    secrets:
+      - kicad_tunnel_token
+    user: "65532:65532"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      ingress_private:
+        ipv4_address: ${KICAD_INGRESS_PROXY_IP:?Preapproved dedicated connector IPv4}
+      connector_egress: {}
+secrets:
+  kicad_tunnel_token:
+    # Inject from the dedicated Doppler value in the future *only* during
+    # operator-reviewed rollout. Never inline or log the token.
+    environment: KICAD_CLOUDFLARE_TUNNEL_TOKEN
+networks:
+  # Clear the original shared network instead of keeping an unused
+  # external network declaration in the merged project model.
+  tunnel: !reset null
+  ingress_private:
+    name: kicad_cloud_ingress_private
+    driver: bridge
+    internal: true
+    attachable: false
+    ipam:
+      config:
+        - subnet: ${KICAD_INGRESS_SUBNET:?Preapproved unused private subnet}
+  connector_egress:
+    name: kicad_cloud_connector_egress
+    driver: bridge
+    internal: false
+    attachable: false
