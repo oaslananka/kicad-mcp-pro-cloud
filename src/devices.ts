@@ -20,8 +20,8 @@ function readCookie(req:Request,origin:string):string|null{
     .find(x=>x.startsWith(name+"="))?.slice(name.length+1)??null;
 }
 function reply(status:number,devices:Parameters<typeof renderDevicesPage>[0]=[],
-  message?:string,stateCookie?:string):Response{
-  const response=new Response(renderDevicesPage(devices,message),{status,headers:{
+  message?:string,stateCookie?:string,enrollmentAvailable=true):Response{
+  const response=new Response(renderDevicesPage(devices,message,enrollmentAvailable),{status,headers:{
     "Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store",
     "Referrer-Policy":"no-referrer","X-Content-Type-Options":"nosniff",
     "Content-Security-Policy":"default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'"
@@ -30,7 +30,12 @@ function reply(status:number,devices:Parameters<typeof renderDevicesPage>[0]=[],
   return response;
 }
 function error(status:number):Response{
-  return reply(status,[],"Device access could not be changed. Reload the device page.");
+  return reply(status,[],"Device management is temporarily unavailable.",undefined,false);
+}
+function pendingSchema(error:unknown):boolean{
+  return Boolean(error && typeof error==="object" && "code" in error &&
+    error.code==="42P01" && "message" in error &&
+    typeof error.message==="string" && error.message.includes('"device_credentials"'));
 }
 function userOf(session:Awaited<ReturnType<NonNullable<BrowserIdentity["api"]>["getSession"]>>){
   if(!session?.user?.id||!session.session?.id)return null;
@@ -61,7 +66,14 @@ async function list(req:Request,identity:BrowserIdentity,origin:string,
   if(!identity.api||!identity.$context)return error(503);
   const who=userOf(await identity.api.getSession({headers:req.headers}));
   if(!who)return new Response(null,{status:303,headers:{"Location":"/sign-in","Cache-Control":"no-store"}});
-  const list=await devices.list(who.user);
+  let list:Awaited<ReturnType<DeviceManagementPort["list"]>>;
+  try{list=await devices.list(who.user);}
+  catch(cause){
+    // Production intentionally remains below device-credential migration 008.
+    // Show a clearly disabled page; never claim an empty live inventory.
+    if(pendingSchema(cause))return reply(200,[],undefined,undefined,false);
+    return error(503);
+  }
   const {secret}=await identity.$context;
   const stamp=String(Date.now()),nonce=randomBytes(16).toString("base64url");
   const rows=await Promise.all(list.map(async d=>({...d,

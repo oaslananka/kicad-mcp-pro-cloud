@@ -3,7 +3,8 @@ import type {ManagedDevice} from "./device-management.js";
 
 export function renderDevicesPage(
   devices:ReadonlyArray<ManagedDevice & {csrf:string}>,
-  notice?:string
+  notice?:string,
+  enrollmentAvailable=true
 ):string {
   return renderPage({
     title:"Your trusted devices.",kind:"devices",eyebrow:"DEVICE SECURITY",
@@ -11,7 +12,8 @@ export function renderDevicesPage(
     children:<section className="card detail-card">
       <div className="card-kicker">ENROLLED DEVICES</div>
       {notice?<output className="output-notice">{notice}</output>:null}
-      {devices.length===0?<p>No enrolled devices. Secure device onboarding is not enabled yet.</p>:
+      {!enrollmentAvailable?<p>Device enrollment and management are not enabled on this deployment. The reviewed device schema must be approved before activation.</p>:
+        devices.length===0?<p>No enrolled devices. Secure device onboarding is not enabled yet.</p>:
         <ul className="connections-list">{devices.map(d=>
           <li className="connection-item" key={d.id}>
             <div>
@@ -28,7 +30,7 @@ export function renderDevicesPage(
           </li>)}</ul>}
       <div className="security-note">Revoked keys cannot authenticate, even if a device flag is later changed.
         No KiCad project files or paths are stored in Cloud.</div>
-      <div className="action-row"><a className="button secondary" href="/devices/pairing">Review device pairing ↗</a></div>
+      {enrollmentAvailable?<div className="action-row"><a className="button secondary" href="/devices/pairing">Review device pairing ↗</a></div>:null}
       <a className="mini-link" href="/account">← Back to account</a>
     </section>
   });
