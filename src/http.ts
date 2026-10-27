@@ -70,11 +70,17 @@ async function handleRequest(
   inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">,devices?:DeviceManagementPort,pairings?:PairingReviewPort,pairingDevice?:PairingDevicePort,deviceSource?:RequestSourceResolver
 ): Promise<void> {
     try {
-      if (!validHost(req, config.publicOrigin) || !validOrigin(req, config)) {
+      const path = new URL(req.url ?? "/", config.publicOrigin).pathname;
+      // These GET routes only render the public sign-in form or redirect to it.
+      // Navigation is safe even if an extension attaches an opaque Origin.
+      // Stateful POSTs, OAuth callbacks and all other routes keep strict Origin checks.
+      const publicLoginNavigation = req.method === "GET" &&
+        (path === "/sign-in" || path === "/auth/start/github" || path === "/auth/start/google");
+      if (!validHost(req, config.publicOrigin) ||
+          (!publicLoginNavigation && !validOrigin(req, config))) {
         deny(res, 403, "origin_or_host_not_allowed");
         return;
       }
-      const path = new URL(req.url ?? "/", config.publicOrigin).pathname;
       if(pairingDevice&&await handlePairingDeviceRequest(req,res,pairingDevice,
         deviceSource??(()=>null)))return;
       if (path === "/assets/ui.css" && req.method === "GET") {
