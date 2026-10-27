@@ -96,13 +96,13 @@ async function forwardKnownRoute(request){
     const path=new URL(request.url).pathname;
     switch(path){
     case "/api/v1/pairing/device/challenge":
-      return fetch(new Request(
+      return await fetch(new Request(
         "https://kicad-mcp-pro.oaslananka.dev/api/v1/pairing/device/challenge",request));
     case "/api/v1/pairing/device/redeem":
-      return fetch(new Request(
+      return await fetch(new Request(
         "https://kicad-mcp-pro.oaslananka.dev/api/v1/pairing/device/redeem",request));
     case "/api/v1/connector/ws":
-      return fetch(new Request(
+      return await fetch(new Request(
         "https://kicad-mcp-pro.oaslananka.dev/api/v1/connector/ws",request));
     default:
       return deny(404);
