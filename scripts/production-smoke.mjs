@@ -50,6 +50,9 @@ assert.match(signInBody,/Continue with GitHub/,
   "First login must offer configured GitHub OAuth");
 assert.doesNotMatch(signInBody,/Continue with Google/,
   "Unconfigured Google OAuth must not be shown");
+const directAuthStart=await fetch("https://kicad-mcp-pro.oaslananka.dev/auth/start/github",options);
+assert.equal(directAuthStart.status,303,"Direct OAuth start GET must return to the sign-in form");
+assert.equal(directAuthStart.headers.get("location"),"/sign-in");
 const account=await fetch("https://kicad-mcp-pro.oaslananka.dev/account",options);
 assert.equal(account.status,303,"Anonymous account access must redirect to sign-in");
 assert.equal(account.headers.get("location"),"/sign-in");
