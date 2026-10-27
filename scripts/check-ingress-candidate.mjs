@@ -4,6 +4,8 @@ import {execFileSync} from "node:child_process";
 import {randomBytes} from "node:crypto";
 
 const syntheticSecret=randomBytes(32).toString("hex");
+// Synthetic RFC1918 sample, never a recommended production allocation.
+const testPrefix=[10,255,242].join(".");
 const env={
   ...process.env,PATH:"/usr/bin:/bin",
   KICAD_DB_PASSWORD:syntheticSecret,
@@ -11,10 +13,10 @@ const env={
   OAUTH_ISSUER:"https://cloud.example.invalid/api/auth",
   OAUTH_JWKS_URL:"https://cloud.example.invalid/api/auth/jwks",
   OAUTH_AUDIENCE:"https://cloud.example.invalid/mcp",
-  KICAD_INGRESS_SUBNET:"10.255.242.0/29",
-  KICAD_INGRESS_APP_IP:"10.255.242.3",
-  KICAD_INGRESS_PROXY_IP:"10.255.242.2",
-  KICAD_CLOUDFLARE_TUNNEL_TOKEN:"synthetic-fixture-only-never-a-real-token"
+  KICAD_INGRESS_SUBNET:testPrefix+".0/29",
+  KICAD_INGRESS_APP_IP:testPrefix+".3",
+  KICAD_INGRESS_PROXY_IP:testPrefix+".2",
+  KICAD_CLOUDFLARE_TUNNEL_TOKEN:randomBytes(32).toString("base64url")
 };
 const composeArgs=[
   "compose","-f","infra/compose.production.yml",

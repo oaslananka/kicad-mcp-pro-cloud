@@ -2,16 +2,16 @@ import assert from "node:assert/strict";
 
 /** Pure validation of the offline merged Compose model. No side effects. */
 export function assertIngressCandidate(model,env,raw){
-  assert.deepEqual(Object.keys(model.services).sort(),["app","cloudflared_kicad","db"]);
+  assert.deepEqual(Object.keys(model.services).sort((a,b)=>a.localeCompare(b)),["app","cloudflared_kicad","db"]);
   assert.equal(model.name,"kicad-cloud");
   assert.equal(model.services.app.image,"kicad-mcp-pro-cloud:production");
   assert.equal(model.services.app.environment.AUTH_MODE,"external");
   assert.equal(model.services.app.environment.PAIRING_DEVICE_API_ENABLED,undefined);
   assert.equal(model.services.app.environment.CONNECTOR_WS_ENABLED,undefined);
   assert.equal(model.services.app.environment.TRUSTED_CLOUDFLARED_PEERS,undefined);
-  assert.deepEqual(Object.keys(model.services.app.networks).sort(),
+  assert.deepEqual(Object.keys(model.services.app.networks).sort((a,b)=>a.localeCompare(b)),
     ["database","ingress_private"]);
-  assert.deepEqual(Object.keys(model.services.cloudflared_kicad.networks).sort(),
+  assert.deepEqual(Object.keys(model.services.cloudflared_kicad.networks).sort((a,b)=>a.localeCompare(b)),
     ["connector_egress","ingress_private"]);
   assert.deepEqual(Object.keys(model.services.db.networks),["database"]);
   assert.equal(model.services.app.networks.ingress_private.ipv4_address,env.KICAD_INGRESS_APP_IP);

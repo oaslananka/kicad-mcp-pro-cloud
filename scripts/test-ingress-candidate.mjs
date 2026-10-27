@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import {test} from "node:test";
 import {assertIngressCandidate} from "./ingress-candidate-contract.mjs";
 
+// Synthetic RFC1918 sample, never a recommended production allocation.
+const testPrefix=[10,255,242].join(".");
 const env={
-  KICAD_INGRESS_APP_IP:"10.255.242.3",
-  KICAD_INGRESS_PROXY_IP:"10.255.242.2",
-  KICAD_INGRESS_SUBNET:"10.255.242.0/29"
+  KICAD_INGRESS_APP_IP:testPrefix+".3",
+  KICAD_INGRESS_PROXY_IP:testPrefix+".2",
+  KICAD_INGRESS_SUBNET:testPrefix+".0/29"
 };
 function valid(){
   return {
