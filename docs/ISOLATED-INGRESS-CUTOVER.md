@@ -1,0 +1,152 @@
+# KiCad Cloud — isolated ingress candidate and rollback (NOT deployed)
+
+**Scope:** this is a reviewed *candidate* overlay, not a production change.
+Do not start containers or alter a Cloudflare hostname route by following the
+validation instructions alone. The existing `ops-cloudflared` connector
+serves unrelated applications and MUST NOT be stopped, recreated, retokenized,
+disconnected or reconfigured as part of the KiCad change.
+
+## Target security architecture
+
+- Retain the existing `kicad-cloud` Compose project, single application
+  image `kicad-mcp-pro-cloud:production`, unchanged persistent PostgreSQL 17
+  database volume and internal database network.
+- Replace the app's shared `ops_internal` attachment with
+  `kicad_cloud_ingress_private`: an isolated, **internal**, non-attachable
+  two-member bridge, with one reserved static address for the app and one for
+  **only a new dedicated KiCad `cloudflared` connector**.
+- Connect the dedicated connector to a second, dedicated **egress** bridge
+  (`kicad_cloud_connector_egress`) for Cloudflare outbound traffic.
+  Neither app nor DB joins this external egress bridge.
+- Run the new connector under its own remotely-managed **KiCad-only Tunnel**
+  with a separately provisioned token. Its ingress service target after
+  acceptance is `http://app:8787`. Never reuse the shared Tunnel token:
+  this could inherit other applications' ingress routes.
+- Consume the new token as a Docker Compose secret from the existing
+  authorized Doppler config `kicad-mcp-pro/prd_cloud`. Compose passes it as a
+  read-only file to `cloudflared tunnel run --token-file`. Never include
+  it in image layers, source, stdout, process arguments or PRs.
+- Do **not** enable built-in OAuth, pairing HTTP, WebSocket or any schema
+  migration as part of this network-only candidate. Live DB currently
+  reports versions 001–006; the connector control plane needs 007–012 later.
+
+This design passes only a **necessary** topology gate. Docker daemon
+administrators, malicious co-resident host processes, separate Docker bridges
+and Cloudflare Worker/Transform configurations must be governed separately.
+Fixed container IP alone does not authenticate the real visitor.
+
+## Offline merge and security verification — safe now
+
+Only the following commands are acceptable for verifying the candidate
+**without modifying production**:
+
+```bash
+node scripts/check-ingress-candidate.mjs
+node --test scripts/test-ingress-candidate.mjs
+npm run check
+```
+
+The offline Compose validator combines
+`infra/compose.production.yml` and
+`infra/compose.isolated-ingress.candidate.yml`, and invokes
+`docker compose config --format json` with **synthetic values only**.
+It explicitly validates that the legacy `ops_internal` attachment is
+removed, not accidentally merged back by Compose. It also validates
+service/network membership, reserved addresses, token file mounting,
+preservation of the DB volume and continued disabled production features.
+It does not build images, create networks, deploy, read Doppler or call
+Cloudflare APIs.
+
+The candidate depends on Docker Compose **2.24.4+** `!override` semantics
+and `secrets.environment` support. Before any real cutover, the
+operator must inventory all host Docker subnets and choose an unused,
+nonoverlapping RFC1918 ingress subnet and two static addresses *inside* it.
+Never copy the example address range from the synthetic tests blindly.
+
+## Release prerequisites — not yet met
+
+1. Record the old KiCad public hostname → shared-Tunnel route and
+   confirm the old app URL/health/OAuth discovery and its private metadata
+   behavior. Preserve its exact rollback definition. Do not change any
+   other hostname or the shared tunnel's 404 fallback.
+2. Create a separate KiCad-only remotely-managed Tunnel and approve its
+   exact account, connector, token storage, expected hostname and ingress
+   path. This is a Cloudflare account change and **is not performed** by
+   this PR. Rotate secrets independently; never retrieve/share existing
+   shared-Tunnel tokens.
+3. Verify an authorized, independently restorable, encrypted offsite
+   backup of the production DB, and a safe rollback plan for the
+   **network-only** change. No new database migration is needed for
+   this transition.
+4. Review VPS firewall, Docker daemon access, effective Compose merging,
+   network subnet reservation, token file permissions, no host ports,
+   no other members on the KiCad private ingress bridge and no new
+   reachable path from another app. Confirm running connector is restricted
+   to this hostname's origin.
+5. Review Cloudflare dashboard/API for per-path rate-limit entitlements and
+   rules on device challenge, redeem and WSS upgrade; verify edge limits
+   without blocking legitimate clients sharing NAT addresses.
+   Confirm Worker/Transform/header provenance, including subrequests.
+   At last read-only audit the KiCad-specific rate rules were **absent**,
+   and transform-phase acceptance was **unverified**.
+6. Preserve a maintenance/cutover window. A zero-downtime switch has
+   **not** been proved: changing the app's network attachment or hostname
+   route may interrupt existing live browser/OAuth traffic. Any temporary
+   dual-homing to both networks is an explicit, short-lived maintenance
+   state that **cannot** pass the final topology preflight.
+
+## Operator-reviewed cutover sequence (future ONLY)
+
+The following steps describe required **outcomes**, not an executable
+deployment script. Each requires an authorized maintenance action.
+
+- **Prepare:** record running image ID, DB volume identity, Compose
+  revision and app/tunnel health. Confirm shared tunnel route snapshot
+  and tested recovery plan. Reserve private subnet after checking collisions.
+  Stage the independent KiCad Tunnel/token with **no active production
+  hostname reassignment**.
+- **Transition:** change only the KiCad application's network attachments
+  and create the dedicated KiCad connector. Existing shared tunnel stays
+  running for all other apps. Coordinate the KiCad hostname route cutover
+  with the app network transition; accept a brief KiCad-only outage if
+  necessary rather than reconfiguring the shared tunnel unexpectedly.
+  Do not deploy a second KiCad application image or a second database.
+- **Verify:** use a verified, unique dedicated connector token and route,
+  run `npm run ingress:preflight -- --app <actual-app> --proxy
+  <dedicated-connector> --network kicad_cloud_ingress_private
+  --expected-peer <approved-ip>` on the VPS; require
+  `PREREQUISITES_MET`, then confirm HTTP/TLS, real WSS upgrade headers,
+  first-party `/health`, OAuth discovery, anonymous access denial and
+  client IP provenance. Check all existing unrelated hostnames independently.
+  Rate limiting and Worker rules are separate required checks.
+- **Accept:** only after post-cutover monitoring and documented approval
+  should any future device/API feature activation even be considered.
+  Network acceptance is **not** approval to enable OAuth, WSS, pairing,
+  remote native KiCad tools or migration 007–012.
+
+## Rollback triggers and order
+
+Trigger rollback on wrong hostname route, missing or malformed
+`CF-Connecting-IP`, inability to reach Cloudflare through the dedicated
+connector, failing health/OAuth discovery, unknown Docker network member,
+unexpected TLS/WSS errors, lost database access or any impact to other apps.
+
+1. **Keep DB and application image untouched.** Do not restore or delete
+   production DB in response to a network-only cutover fault.
+2. Ensure the KiCad app is reachable from the **original shared Tunnel**
+   via its prior, recorded network attachment **before** redirecting
+   the public KiCad hostname back to the recorded old route. Coordinate
+   this to minimize downtime; never route traffic to an unreachable origin.
+3. Reconfirm old KiCad hostname health, OAuth discovery and denial checks.
+   Verify unrelated apps on the shared tunnel are still healthy.
+4. Stop only the **dedicated KiCad connector** once old KiCad routing has
+   recovered; do not touch shared `ops-cloudflared`. Do not run network/image
+   prune, or remove the production database or unrelated networks.
+5. Document any temporary dual-homing or untrusted-header exposure, revoke
+   the retired dedicated token if necessary, and rerun preflight: a rollback
+   to the historical network should yield **BLOCKED**, which is expected.
+6. Keep the device API and WSS feature flags **OFF** until an independently
+   accepted, complete isolation plus edge-protection rollout succeeds.
+
+This procedure is Cloud-scope documentation, not authorization to alter
+the shared infrastructure of other projects.
