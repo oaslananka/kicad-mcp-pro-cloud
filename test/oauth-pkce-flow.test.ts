@@ -5,7 +5,7 @@ import {test} from "node:test";
 import type {AddressInfo} from "node:net";
 import {request as nodeRequest,type Server} from "node:http";
 import pg from "pg";
-import {decodeJwt} from "jose";
+import {decodeJwt,exportJWK,generateKeyPair,SignJWT} from "jose";
 import {createIdentity} from "../src/identity.js";
 import {createHttpServer} from "../src/http.js";
 import {PgGrantManagement} from "../src/grants.js";
@@ -164,6 +164,70 @@ test("real MCP OAuth server: authorize redirect, session consent and PKCE code e
     });
     assert.equal(invalid.status,400,"a new code must require its matching PKCE verifier");
     assert.equal((await invalid.json() as {error:string}).error,"invalid_grant");
+
+    // ChatGPT CIMD publishes token_endpoint_auth_method: private_key_jwt.
+    // Prove the real provider can exchange a PKCE code for that client type
+    // without hosting any test key or creating access in production.
+    const confidentialId="chatgpt-like-private-jwt";
+    const {publicKey,privateKey}=await generateKeyPair("RS256",{extractable:true});
+    const publishedKey={...await exportJWK(publicKey),kid:"synthetic-jwt-key",alg:"RS256",use:"sig"};
+    await pool.query('INSERT INTO "oauthClient"("id","clientId","redirectUris","tokenEndpointAuthMethod",'+
+      '"jwks","grantTypes","responseTypes","scopes","requirePKCE") VALUES($1,$1,$2,$3,$4,$5,$6,$7,true)',
+      [confidentialId,JSON.stringify(["http://127.0.0.1:8888/callback"]),"private_key_jwt",
+        JSON.stringify({keys:[publishedKey]}),JSON.stringify(["authorization_code","refresh_token"]),
+        JSON.stringify(["code"]),JSON.stringify(["openid","profile","offline_access","projects:read"])]);
+    await pool.query('INSERT INTO "oauthClientResource"("id","clientId","resourceId") VALUES($1,$2,$3)',
+      ["confidential-link",confidentialId,publicOrigin+"/mcp"]);
+    params.set("client_id",confidentialId);
+    params.set("state",randomBytes(16).toString("base64url"));
+    const pending=await browserNavigate(cookie);
+    assert.ok([302,303].includes(pending.status));
+    assert.match(pending.location,/consent/);
+    const signedConsent=new URL(pending.location,publicOrigin);
+    const consentPage=await fetch(address+signedConsent.pathname+signedConsent.search,{
+      headers:{cookie},redirect:"manual"
+    });
+    assert.equal(consentPage.status,200);
+    assert.equal(consentPage.headers.get("referrer-policy"),"same-origin");
+    assert.match(consentPage.headers.get("content-security-policy")??"",
+      /form-action 'self' http:\/\/127\.0\.0\.1:8888;/);
+    const consentHtml=await consentPage.text();
+    const proof=/name="csrf" value="([^"]+)"/.exec(consentHtml)?.[1]??"";
+    assert.ok(proof);
+    const stateCookie=consentPage.headers.get("set-cookie")?.split(";")[0]??"";
+    const explicit=await fetch(address+"/consent",{
+      method:"POST",headers:{"Origin":publicOrigin,"Content-Type":"application/x-www-form-urlencoded",
+        "Cookie":cookie+"; "+stateCookie},
+      body:new URLSearchParams({oauth_query:signedConsent.search.slice(1),csrf:proof,decision:"approve"}),
+      redirect:"manual"
+    });
+    assert.equal(explicit.status,303);
+    const callback=new URL(explicit.headers.get("location")!);
+    const confidentialCode=callback.searchParams.get("code");
+    assert.ok(confidentialCode);
+    const exchangeConfidential=async(assertion:string)=>fetch(address+"/api/auth/oauth2/token",{
+      method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},
+      body:new URLSearchParams({grant_type:"authorization_code",client_id:confidentialId,
+        code:confidentialCode!,redirect_uri:"http://127.0.0.1:8888/callback",
+        code_verifier:verifier,
+        client_assertion_type:"urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+        client_assertion:assertion})
+    });
+    const unsigned=await exchangeConfidential("not-a-valid-assertion");
+    assert.notEqual(unsigned.status,200,"Unverified client assertion must fail");
+    const assertion=await new SignJWT({})
+      .setProtectedHeader({alg:"RS256",kid:"synthetic-jwt-key",typ:"JWT"})
+      .setIssuer(confidentialId).setSubject(confidentialId)
+      .setAudience(publicOrigin+"/api/auth/oauth2/token")
+      .setIssuedAt().setExpirationTime("60s")
+      .setJti(randomBytes(16).toString("base64url"))
+      .sign(privateKey);
+    const verified=await exchangeConfidential(assertion);
+    assert.equal(verified.status,200,await verified.clone().text());
+    const issued=await verified.json() as {access_token:string;refresh_token?:string};
+    assert.equal(typeof issued.access_token,"string");
+    assert.equal(typeof issued.refresh_token,"string");
+    assert.ok([decodeJwt(issued.access_token).aud].flat().includes(publicOrigin+"/mcp"));
   }finally{
     if(server) await new Promise<void>(resolve=>server!.close(()=>resolve()));
     await grants?.close();
