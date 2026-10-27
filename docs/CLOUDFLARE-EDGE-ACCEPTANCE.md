@@ -108,3 +108,13 @@ Primary Cloudflare references:
 - https://developers.cloudflare.com/waf/rate-limiting-rules/parameters/
 - https://developers.cloudflare.com/waf/rate-limiting-rules/best-practices/
 - https://developers.cloudflare.com/fundamentals/reference/http-headers/
+
+## Offline-only Workers Rate Limiting alternative
+
+A no-route and no-deployment Worker *candidate* now exists in
+[FREE-EDGE-WORKER-CANDIDATE.md](FREE-EDGE-WORKER-CANDIDATE.md).
+This is **not** verified production entitlement or edge rate-limit
+protection. Until exact account billing/quota, Worker subrequest
+header provenance and live isolated-Tunnel route acceptance pass,
+the existing edge gate must continue to return BLOCKED; do not
+remove the leaked-credential WAF rule or purchase a paid plan.

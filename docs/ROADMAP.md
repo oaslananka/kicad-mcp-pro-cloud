@@ -205,3 +205,15 @@ or production enrollment is available.
 - [x] Actual encrypted production snapshot migrated 006 to 012
       in disposable PostgreSQL 17 RAM; source metadata preserved,
       replay idempotent and live schema still 006 (27 Oct 2026).
+
+## Free edge rate-limit exploration
+
+- [x] Prepare Cloud-only, **not deployed**, endpoint-scoped Worker
+      Rate Limiting binding candidate with two budgets per endpoint,
+      fail-closed behavior and offline adversarial unit tests.
+- [ ] Confirm Workers Free entitlement for Rate Limiting binding,
+      account-wide daily capacity and hard no-charge behavior.
+- [ ] Independently verify Worker -> dedicated Tunnel source header
+      authenticity, WebSocket Upgrade, no request recursion and route
+      scoping before extending the edge readiness contract or enabling
+      any public endpoint.
