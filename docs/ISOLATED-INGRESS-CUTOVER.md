@@ -150,3 +150,14 @@ unexpected TLS/WSS errors, lost database access or any impact to other apps.
 
 This procedure is Cloud-scope documentation, not authorization to alter
 the shared infrastructure of other projects.
+
+
+## Verified Cloudflare control-plane blockers (2026-10-27)
+
+The live KiCad hostname still targets a healthy shared, remotely managed
+Tunnel with three unrelated hostnames; its DNS CNAME resolves to that
+Tunnel. Cloudflare's Free Website zone has **one active leaked-credential
+rate-limit rule** but no KiCad-specific device/WSS rule. Do not remove
+the current rule or cut over the hostname without an independently
+reviewed dedicated Tunnel, preserved rules and verified edge capacity.
+See [Cloudflare edge acceptance](CLOUDFLARE-EDGE-ACCEPTANCE.md).

@@ -41,6 +41,8 @@ jobs:
         run: |
           node scripts/check-ingress-candidate.mjs
           node --test scripts/test-ingress-candidate.mjs
+      - name: Validate offline Cloudflare edge release requirements
+        run: node --test scripts/test-cloudflare-edge.mjs
       - name: Build secret-free OCI image
         run: docker build -t kicad-mcp-pro-cloud:ci .
       - name: Prove ephemeral PostgreSQL backup and restore
