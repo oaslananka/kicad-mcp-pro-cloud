@@ -17,7 +17,7 @@ const htmlHeaders = {
   // HTML form navigations with no-referrer transmit Origin: null in Chrome;
   // same-origin preserves the verified Origin for first-party OAuth POSTs.
   "Referrer-Policy":"same-origin",
-  "Content-Security-Policy":"default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'"
+  "Content-Security-Policy":"default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self' https://github.com https://accounts.google.com; style-src 'self'"
 };
 
 function page(title:string,message:string,status=200):Response {

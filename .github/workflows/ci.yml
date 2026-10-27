@@ -36,6 +36,9 @@ jobs:
           node --check scripts/production-smoke.mjs
           bash -n scripts/production-backup.sh
           bash -n scripts/production-restore-drill.sh
+          bash -n scripts/production-deploy-if-ready.sh
+          bash -n scripts/install-production-deploy-timer.sh
+          node --check scripts/production-browser-smoke.mjs
           if bash scripts/production-restore-drill.sh --invalid >/dev/null 2>&1; then
             echo "Restore drill accepted an unsupported action" >&2
             exit 1

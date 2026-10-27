@@ -8,6 +8,8 @@ COPY src ./src
 RUN npm run build && npm prune --omit=dev --ignore-scripts
 
 FROM node:24-bookworm-slim AS runtime
+ARG APP_REVISION=unknown
+ENV APP_REVISION=${APP_REVISION}
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --chown=node:node --from=build /app/node_modules ./node_modules

@@ -5,19 +5,21 @@ VPS and healthy Cloudflare Tunnel at:
 https://kicad-mcp-pro.oaslananka.dev
 
 An isolated PostgreSQL 17 container, private Docker database network,
-persistent volume and a single production application image are installed.
+persistent volume and one active plus one rollback application image are installed.
 No host-side database or application ports are published. Cloudflare tunnel
 ingress is shared with existing services, which must not be interrupted.
 
 Doppler kicad-mcp-pro/prd_cloud holds runtime configuration and secrets;
-GitHub Secrets contains only DOPPLER_TOKEN. No staging environment or
-rollback application image is retained by user requirement. This existing
+GitHub Secrets contains only DOPPLER_TOKEN (used for the optional manually
+triggered config check, not deployment). CI-gated application deployment now
+uses an outbound-only VPS user timer and the `Production Deployment` GitHub
+Actions workflow, with one rollback app image and no staging. This existing
 VPS/tunnel setup needs no OpenTofu re-provisioning; provision additional
 resources only for a demonstrated requirement and avoid duplicate services.
 
-Public premium UI and anonymous token enforcement are deployed. Live Google
-and GitHub sign-in, AI-client OAuth and local KiCad device execution are still
-unaccepted/unimplemented. See infra/PRODUCTION-DEPLOY.md and
+Public premium UI and anonymous token enforcement are deployed. GitHub OAuth
+start is configured, but the actual user callback/session and AI-client OAuth
+are not yet fully accepted; local KiCad device execution remains unavailable. See infra/PRODUCTION-DEPLOY.md and
 docs/OAUTH-PRODUCTION-ACCEPTANCE.md.
 
 ## Controlled versioned PostgreSQL migrations
@@ -67,5 +69,5 @@ For local reproduction, build the reviewed OCI image and run:
 
 This disposable test is not a production restore: it does not validate
 offsite backup retention, remote restore RTO/RPO or full database recovery.
-Production has no staging or retained rollback app image by policy. See
+Production has no staging, but retains one rollback application image. See
 the production backup/restore limits in infra/PRODUCTION-DEPLOY.md.

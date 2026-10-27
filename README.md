@@ -2,7 +2,7 @@
 
 A remote, authenticated MCP resource server and future account/device control plane for [KiCad MCP Pro](https://github.com/oaslananka/kicad-mcp-pro). KiCad files, local project paths, native tool execution and design changes stay on the user's workstation.
 
-**Status: foundation preview, not a complete ChatGPT/Claude product.** Signup, a running OAuth authorization server, device enrollment/relay, live KiCad execution, write tools and the user dashboard do not exist yet. Never advertise these as implemented.
+**Status: foundation preview, not a complete ChatGPT/Claude product.** A built-in OAuth service and GitHub login entry are deployed, but a real authenticated user callback and AI-client consent have not yet passed end-to-end acceptance. Device enrollment/relay, live KiCad execution and write tools are not available. Never advertise these as implemented.
 
 ## What's implemented
 
@@ -47,6 +47,14 @@ Official references:
 All runtime settings and secrets are read from the Doppler project at process
 start. The ONLY configured GitHub Actions repository secret is DOPPLER_TOKEN.
 Read [docs/DOPPLER.md](docs/DOPPLER.md) before provisioning.
+
+**Production delivery:** Successful `main` CI is followed by the
+`Production Deployment` Actions workflow. The existing VPS polls the verified
+commit using a project-only systemd timer, deploys using Doppler and Docker
+Compose, and reports the live commit through `/health`. Actions independently
+checks the deployed revision and real Chromium login form; there is no public
+SSH/deploy port or additional Actions secret. Full setup, parameters, rollback
+and recovery: [infra/PRODUCTION-DEPLOY.md](infra/PRODUCTION-DEPLOY.md).
 
     npm ci && npm run check
     doppler run -- npm run config:check

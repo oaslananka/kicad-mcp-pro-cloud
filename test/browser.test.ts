@@ -24,6 +24,8 @@ test("first-party sign-in is available only with builtin identity",async()=>{
   assert.match(await page!.text(),/Continue with Google/);
   assert.equal(page?.headers.get("referrer-policy"),"same-origin",
     "Native browser form POST must not convert its Origin to null");
+  assert.match(page?.headers.get("content-security-policy")??"",/form-action 'self' https:\/\/github\.com/,
+    "Chrome must allow the GitHub OAuth redirect following first-party form POST");
   const invalid=await browserResponse(new Request(origin+"/sign-in?client_id=attacker"),mock(),origin);
   assert.equal(invalid?.status,400);
 });

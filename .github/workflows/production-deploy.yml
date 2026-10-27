@@ -1,0 +1,78 @@
+name: Production Deployment
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+permissions:
+  contents: read
+concurrency:
+  group: kicad-cloud-production
+  cancel-in-progress: false
+jobs:
+  production:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment:
+      name: production
+      url: https://kicad-mcp-pro.oaslananka.dev/
+    env:
+      EXPECTED_REVISION: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Ensure tested revision is still current main
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq '.sha')
+          if [[ "$EXPECTED_REVISION" != "$current" ]]; then
+            echo 'superseded=true' >> "$GITHUB_OUTPUT"
+            echo 'Skipping superseded release; newer main must pass CI.'
+          else
+            echo 'superseded=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Await VPS release and verify exact revision
+        if: steps.version.outputs.superseded == 'false'
+        run: |
+          set -euo pipefail
+          # The dedicated VPS timer reads this same successful main CI run,
+          # builds locally, and deploys with a single-image rollback.
+          for attempt in $(seq 1 40); do
+            live=$(curl --fail --silent --show-error --max-time 10 --retry 0 \
+              https://kicad-mcp-pro.oaslananka.dev/health | \
+              python3 -c 'import json,sys; print(json.load(sys.stdin).get("revision","unknown"))') || live=unreachable
+            if [[ "$live" == "$EXPECTED_REVISION" ]]; then
+              echo "Deployed exact CI-verified revision $EXPECTED_REVISION";
+              exit 0
+            fi
+            echo "Deployment awaiting VPS watcher (attempt ${attempt}/40)."
+            sleep 15
+          done
+          echo 'Deployment not verified; production job fails closed.' >&2
+          exit 1
+      - uses: actions/checkout@v4
+        if: steps.version.outputs.superseded == 'false'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        if: steps.version.outputs.superseded == 'false'
+        with:
+          node-version: '24'
+      - name: Install Chromium for real first-party login acceptance
+        if: steps.version.outputs.superseded == 'false'
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install --with-deps chromium
+      - name: Independent public production smoke
+        if: steps.version.outputs.superseded == 'false'
+        run: node scripts/production-smoke.mjs
+      - name: Native Chromium GitHub login form acceptance
+        if: steps.version.outputs.superseded == 'false'
+        run: node scripts/production-browser-smoke.mjs

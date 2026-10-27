@@ -24,6 +24,11 @@ const health=await fetch("https://kicad-mcp-pro.oaslananka.dev/health",options);
 assert.equal(health.status,200);
 const status=await health.json();
 assert.equal(status.status,"ok");
+if (process.env.EXPECTED_REVISION) {
+  assert.match(process.env.EXPECTED_REVISION,/^[0-9a-f]{40}$/);
+  assert.equal(status.revision,process.env.EXPECTED_REVISION,
+    "Live release commit must match exact successfully tested main SHA");
+}
 assert.equal(status.remoteConnector,"not_implemented",
   "Do not claim the local KiCad connector exists");
 
@@ -47,6 +52,8 @@ const signIn=await fetch("https://kicad-mcp-pro.oaslananka.dev/sign-in",options)
 assert.equal(signIn.status,200,"GitHub sign-in page must be enabled");
 assert.equal(signIn.headers.get("referrer-policy"),"same-origin",
   "Native HTML form POST must retain same-origin Origin in Chrome");
+assert.match(signIn.headers.get("content-security-policy")??"",/form-action 'self' https:\/\/github\.com/,
+  "Browser form-action CSP must permit the approved GitHub OAuth redirect");
 const signInBody=await signIn.text();
 assert.match(signInBody,/Continue with GitHub/,
   "First login must offer configured GitHub OAuth");
