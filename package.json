@@ -33,7 +33,6 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
-    "@codspeed/vitest-plugin": "^6.1.0",
     "@types/node": "^24.9.1",
     "@types/pg": "^8.15.5",
     "@types/react": "19.3.0",

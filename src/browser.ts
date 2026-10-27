@@ -114,6 +114,11 @@ export async function browserResponse(request:Request,identity:BrowserIdentity,p
   let provider: "google" | "github" | null = null;
   if (url.pathname === "/auth/start/google") provider = "google";
   else if (url.pathname === "/auth/start/github") provider = "github";
+  // The OAuth start endpoint requires the CSRF-checked first-party POST.
+  // A direct browser GET must never begin OAuth; guide the visitor to the form.
+  if (provider && request.method === "GET") {
+    return new Response(null,{status:303,headers:{"Location":"/sign-in","Cache-Control":"no-store"}});
+  }
   if(provider && request.method==="POST") {
     if(!availableProviders(identity).includes(provider)){
       return page("Sign-in unavailable","This provider is not enabled.",404);

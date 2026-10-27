@@ -66,6 +66,13 @@ test("GitHub-only identity hides and denies unconfigured Google login",async()=>
   assert.equal(disallowed?.status,404);
 });
 
+test("direct OAuth start GET returns to first-party sign-in without starting OAuth",async()=>{
+  const response=await browserResponse(new Request(origin+"/auth/start/github"),mock(),origin);
+  assert.equal(response?.status,303);
+  assert.equal(response?.headers.get("location"),"/sign-in");
+  assert.equal(response?.headers.get("cache-control"),"no-store");
+});
+
 test("sign-in denies CSRF, tampered query, and extra fields",async()=>{
   const attack=await browserResponse(new Request(origin+"/auth/start/github",{
     method:"POST",

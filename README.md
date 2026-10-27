@@ -1,7 +1,5 @@
 # KiCad MCP Pro Cloud
 
-[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/oaslananka/kicad-mcp-pro-cloud?utm_source=badge)
-
 A remote, authenticated MCP resource server and future account/device control plane for [KiCad MCP Pro](https://github.com/oaslananka/kicad-mcp-pro). KiCad files, local project paths, native tool execution and design changes stay on the user's workstation.
 
 **Status: foundation preview, not a complete ChatGPT/Claude product.** Signup, a running OAuth authorization server, device enrollment/relay, live KiCad execution, write tools and the user dashboard do not exist yet. Never advertise these as implemented.
@@ -26,7 +24,7 @@ Requires Node.js 24+ and an isolated PostgreSQL instance. The service does NOT h
 
 Doppler injects runtime values into the process; no .env file is used. Real OAuth issuer, JWKS endpoint, audience, database and HTTPS reverse proxy must be configured before any public exposure.
 
-Run CPU benchmarks with npm run bench (Vitest + CodSpeed, files in bench/). The CodSpeed workflow measures them in CPU simulation mode on every push to main and pull request.
+Run optional local CPU benchmarks with npm run bench (Vitest, files in bench/). No third-party benchmarking service is required.
 
 Run PostgreSQL integration tests against a disposable DB with TEST_DATABASE_URL set. CI runs those tests against an ephemeral PostgreSQL service.
 
