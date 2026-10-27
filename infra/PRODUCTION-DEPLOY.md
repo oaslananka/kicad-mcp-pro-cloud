@@ -1,8 +1,68 @@
-# Direct production; single active application image
+# Production deployment: CI-gated, VPS-executed, audited in Actions
 
-No staging environment. Docker Compose retains one active KiCad application
-image, kicad-mcp-pro-cloud:production, plus PostgreSQL 17 as a required
-infrastructure service. No rollback application images are retained.
+No staging environment. Docker Compose retains one active KiCad image
+(`kicad-mcp-pro-cloud:production`), one previous rollback image
+(`kicad-mcp-pro-cloud:rollback`), and the PostgreSQL 17 service. There is
+no external runner, public deployment port or SSH permission from Actions.
+
+## Automatic application-only release flow
+
+1. GitHub Actions `CI` runs on every push to `main` (typecheck, unit and
+   PostgreSQL tests, security/infra gates and OCI build).
+2. After the exact `main` CI succeeds, GitHub Actions `Production Deployment`
+   starts. It refuses PR, fork, failed CI, and superseded main revisions.
+3. On the existing VPS, a `systemd --user` timer checks current `main` every
+   two minutes. Only when it differs from the running revision, it fetches
+   public CI run metadata and requires a successful **push/main** `CI` for
+   that exact SHA. It builds and deploys that commit, without a secret on
+   GitHub Actions or an inbound deploy webhook.
+4. The VPS deployer saves the previous application image as the one rollback,
+   recreates **only** the app, checks Docker health and the production smoke
+   including the exact SHA. On failure it recreates the previous app.
+5. GitHub Actions waits for `/health` to report the expected revision, then
+   runs a separate public smoke and **real Chromium form POST** (must redirect
+   to `github.com`, with no user authorization performed). Deployment is green
+   only when live acceptance passes. Failure remains visible in Actions.
+
+The source of truth for the running revision is `GET /health` → `revision`.
+The `APP_REVISION` build argument contains only a public Git commit SHA.
+Production app, database and Cloudflare are not recreated for CI tests.
+Migrations are a **separate explicit process**, never a hidden deploy hook.
+
+### One-time VPS timer setup
+
+Keep the regular development checkout and create one clean dedicated deployment
+worktree, for example:
+
+    git worktree add --detach "$HOME/Desktop/OPS_WORKSPACE/GITHUB/oaslananka/.worktrees/kicad-mcp-pro-cloud-production" origin/main
+    cd "$HOME/Desktop/OPS_WORKSPACE/GITHUB/oaslananka/.worktrees/kicad-mcp-pro-cloud-production"
+    bash scripts/install-production-deploy-timer.sh
+    systemctl --user status kicad-cloud-production.timer
+
+The user systemd manager must have linger enabled, Docker group access and
+existing Doppler login. `scripts/install-production-deploy-timer.sh` creates
+only a KiCad-specific user service/timer using this verified checkout; it
+adds no deploy tokens or network listeners. Use
+`systemctl --user start kicad-cloud-production.service` to trigger a check,
+`journalctl --user -u kicad-cloud-production.service` to inspect results, and
+`systemctl --user disable --now kicad-cloud-production.timer` to pause it.
+Do not edit the deployment worktree while the timer is running.
+
+### Configuration ownership
+
+| Surface | Values | Responsibility |
+| --- | --- | --- |
+| Doppler `kicad-mcp-pro / prd_cloud` | `PUBLIC_ORIGIN`, `OAUTH_ISSUER`, `OAUTH_JWKS_URL`, `OAUTH_AUDIENCE`, `KICAD_DB_PASSWORD`, `AUTH_MODE`, `BETTER_AUTH_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | Existing VPS runtime; never commit values |
+| Docker Compose `infra/compose.production.yml` | App/DB volumes, healthcheck, private networks, image tag | Existing VPS |
+| GitHub Actions `CI` | Main/PR checks; no production credentials | GitHub hosted |
+| GitHub Actions `Production Deployment` | Exact CI SHA, environment `production`, public `/health` and browser acceptance | GitHub hosted, no SSH/Doppler token |
+| VPS user timer + deploy script | Outbound-only polling, local Docker build, rollback and Doppler inject | Existing VPS |
+| Cloudflare Tunnel | Existing HTTPS public host mapping, no new tunnel | Unchanged |
+
+The only existing GitHub repository secret remains `DOPPLER_TOKEN` for a
+separately manually triggered configuration check. Automatic deployment does
+not use this token or require additional GitHub secrets.
+
 
 The database network is internal with no published port. The application
 joins that network plus the preexisting ops_internal Cloudflare tunnel
@@ -13,7 +73,8 @@ Required variables: KICAD_DB_PASSWORD, PUBLIC_ORIGIN,
 OAUTH_ISSUER, OAUTH_JWKS_URL and OAUTH_AUDIENCE. DATABASE_URL contains no credentials; pg uses PGPASSWORD from the Doppler password.
 GitHub Secrets must contain only DOPPLER_TOKEN.
 
-Production defaults to AUTH_MODE=external. After registering and securely
+The default is AUTH_MODE=external; the current live deployment explicitly uses
+AUTH_MODE=builtin from Doppler for GitHub-only login. After registering and securely
 storing a real GitHub OAuth Web app in the existing Doppler config,
 AUTH_MODE=builtin may be explicitly set for first-login acceptance.
 Google credentials are optional until the second provider is registered;
@@ -26,7 +87,8 @@ or remote KiCad execution is operational.
 
 From the checked-out repository root:
 
-1. Build the single image: docker build -t kicad-mcp-pro-cloud:production .
+1. For manual recovery only, build with the reviewed commit:
+   docker build --build-arg APP_REVISION="$(git rev-parse HEAD)" -t kicad-mcp-pro-cloud:production .
 2. Inject Doppler config into Docker Compose invocation:
    doppler run -p kicad-mcp-pro -c prd_cloud -- docker compose -f infra/compose.production.yml up -d db
 3. Review SQL and backup. Check pending migrations, then explicitly apply:
@@ -43,7 +105,7 @@ From the checked-out repository root:
    prune: this VPS hosts other independent production services.
 
 Migrations do not execute at server startup. Production database backups
-remain necessary even though no app rollback image is retained.
+remain necessary; an app image rollback does not roll back database migrations.
 
 ## Production-only operational checks and database recovery
 

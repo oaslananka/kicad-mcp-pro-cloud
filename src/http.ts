@@ -124,7 +124,8 @@ async function handleRequest(
         }
       }
       if (path === "/health" && req.method === "GET") {
-        json(res, 200, { status: "ok", mcp: "/mcp", remoteConnector: "not_implemented" });
+        json(res, 200, { status: "ok", mcp: "/mcp", remoteConnector: "not_implemented",
+          revision: /^[0-9a-f]{40}$/.test(process.env.APP_REVISION ?? "") ? process.env.APP_REVISION : "unknown" });
         return;
       }
       if ((path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/mcp") && req.method === "GET") {
