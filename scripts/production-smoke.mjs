@@ -9,9 +9,11 @@ assert.match(landingResponse.headers.get("content-type")??"",/text\/html/);
 assert.match(landingResponse.headers.get("content-security-policy")??"",/style-src 'self'/);
 const page=await landingResponse.text();
 assert.match(page,/Engineering, connected\./);
-assert.match(page,/Account access pending/);
+assert.match(page,/href="\/sign-in"/,
+  "Public overview must link to the enabled sign-in route");
 assert.doesNotMatch(page,/<script[\s>]/i);
-assert.doesNotMatch(page,/href="\/sign-in"/);
+assert.doesNotMatch(page,/Account access pending/,
+  "Public overview must not claim sign-in is disabled");
 
 const stylesheet=await fetch("https://kicad-mcp-pro.oaslananka.dev/assets/ui.css",options);
 assert.equal(stylesheet.status,200);
@@ -42,5 +44,17 @@ const unauthenticated=await fetch("https://kicad-mcp-pro.oaslananka.dev/mcp",{
 });
 assert.equal(unauthenticated.status,401,"MCP must reject untrusted clients");
 const signIn=await fetch("https://kicad-mcp-pro.oaslananka.dev/sign-in",options);
-assert.equal(signIn.status,404,"Unreleased public OAuth sign-in must remain disabled");
-console.log("Production smoke PASS: HTTPS, premium UI/CSS, health, MCP resource discovery, anonymous 401, login disabled");
+assert.equal(signIn.status,200,"GitHub sign-in page must be enabled");
+const signInBody=await signIn.text();
+assert.match(signInBody,/Continue with GitHub/,
+  "First login must offer configured GitHub OAuth");
+assert.doesNotMatch(signInBody,/Continue with Google/,
+  "Unconfigured Google OAuth must not be shown");
+const account=await fetch("https://kicad-mcp-pro.oaslananka.dev/account",options);
+assert.equal(account.status,303,"Anonymous account access must redirect to sign-in");
+assert.equal(account.headers.get("location"),"/sign-in");
+const authorizationMetadata=await fetch(
+  "https://kicad-mcp-pro.oaslananka.dev/.well-known/oauth-authorization-server/api/auth",
+  options);
+assert.equal(authorizationMetadata.status,200,"OAuth discovery must be reachable");
+console.log("Production smoke PASS: HTTPS, UI/CSS, OAuth discovery, anonymous MCP 401, GitHub-only login and protected account");
