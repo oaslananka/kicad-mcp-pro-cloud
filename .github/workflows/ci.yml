@@ -47,6 +47,7 @@ jobs:
           node --check scripts/portable-config.mjs
           node --check scripts/verify-bootstrap-pr.mjs
           bash -n scripts/install-production-deploy-timer.sh
+          bash -n scripts/test-release-watcher-guards.sh
           node --check scripts/production-browser-smoke.mjs
           node --check scripts/ui-visual-smoke.mjs
           if bash scripts/production-restore-drill.sh --invalid >/dev/null 2>&1; then
@@ -60,6 +61,8 @@ jobs:
           node --test scripts/test-portable-deployment.mjs
           node --test scripts/test-bootstrap-pr.mjs
           bash scripts/test-portable-bootstrap.sh
+      - name: Verify release watcher cutover and reboot guards (isolated mocks)
+        run: bash scripts/test-release-watcher-guards.sh
       - name: Verify isolated ingress candidate only (offline, synthetic secrets)
         run: |
           node scripts/check-ingress-candidate.mjs

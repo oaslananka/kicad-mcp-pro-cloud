@@ -177,15 +177,38 @@ and any paid provider change remain **separate acceptance tasks**.
 
 ### Release-watcher cutover (separate operator action)
 
-After an independent installation acceptance, first disable the prior VPS's
-`kicad-cloud-production.timer` under its owning `systemd --user` instance,
-verify that it stopped, and verify the new destination is the one configured
-by both the GitHub and VPS production Doppler tokens. Only then, from the new
-clean deployment worktree, enable the existing timer by running
-`KICAD_DOPPLER_SCOPED=true bash scripts/install-production-deploy-timer.sh`.
-Do not run old and new production watchers concurrently; the repository has
-one `main` release stream and one GitHub `DOPPLER_TOKEN` deployment destination.
-This cutover is **not** an automated side effect of fresh installation.
+After an independent installation acceptance and an **authorized main
+merge/release decision**, first disable the prior VPS's
+`kicad-cloud-production.timer` under its owning `systemd --user` instance
+and verify that it stopped (an owner action performed **on the old VPS**).
+Verify the new destination is the one configured by both the GitHub and VPS
+production Doppler tokens; the old production timer must no longer deploy
+that same `main` stream. On the **new VPS**, ensure the checked-out commit
+matches the exact *current remote main*, not the unmerged PR acceptance SHA,
+and that the per-user systemd manager survives logout/reboot:
+`loginctl show-user "$(id -un)" -p Linger --value` should report `yes`.
+If it reports `no`, the authorized VPS administrator must separately enable
+user lingering (e.g. `sudo loginctl enable-linger "$(id -un)"`) before cutover.
+
+Only **after** the old watcher is demonstrably disabled, the intended target
+is checked, and lingering is enabled, explicitly acknowledge the handover:
+
+```bash
+export KICAD_DOPPLER_SCOPED=true
+export KICAD_WATCHER_CUTOVER_CONFIRMED=old-watcher-disabled-and-destination-verified
+bash scripts/install-production-deploy-timer.sh
+```
+
+For a new scoped-Doppler VPS the installer rejects absent acknowledgement,
+disabled user lingering or an unavailable user manager **before touching
+systemd unit files**. For every VPS it also rejects unmerged PR checkouts,
+dirty Git worktrees and any checkout behind current remote `main`. These
+checks cannot remotely prove that the old VPS is stopped: the confirmation
+must reflect an actual operator-verified cutover, not a guess. The existing
+production timer is not modified by this PR. Do not run old and new watchers
+concurrently; there is one `main` release stream and one production
+GitHub `DOPPLER_TOKEN` destination. The cutover is **never** a side effect
+of first installation or PR acceptance.
 
 On an **existing** production VPS, keep its existing shared Tunnel and Compose
 network (`ops_internal` legacy default), release timer and Doppler selection.
