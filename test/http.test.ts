@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createServer as httpCreateServer, type Server } from "node:http";
+import { createServer as httpCreateServer, request as httpRequest, type Server } from "node:http";
 import { after, before, test } from "node:test";
 import type { AddressInfo } from "node:net";
 import { createHttpServer } from "../src/http.js";
@@ -169,6 +169,32 @@ test("identity routes are proxied only when enabled, preserving response cookies
     const discovery=await fetch(base+"/.well-known/oauth-authorization-server/api/auth");
     assert.equal(discovery.status,200);
     assert.match(discovery.headers.get("set-cookie")??"",/HttpOnly/);
+    // Untrusted/opaque Origin on public GET navigation is harmless; the
+    // browser must still complete the same-origin POST with CSRF checks.
+    const navigation=await fetch(base+"/auth/start/github",{
+      headers:{Origin:"null"},redirect:"manual"
+    });
+    assert.equal(navigation.status,303);
+    assert.equal(navigation.headers.get("location"),"/sign-in");
+    const publicSignIn=await fetch(base+"/sign-in",{headers:{Origin:"chrome-extension://fixture"}});
+    assert.equal(publicSignIn.status,200);
+    assert.match(await publicSignIn.text(),/Continue with GitHub/);
+    const maliciousPost=await fetch(base+"/auth/start/github",{
+      method:"POST",headers:{Origin:"null","Content-Type":"application/x-www-form-urlencoded"},
+      body:"oauth_query=",redirect:"manual"
+    });
+    assert.equal(maliciousPost.status,403);
+    const protectedRoute=await fetch(base+"/api/auth/jwks",{headers:{Origin:"null"}});
+    assert.equal(protectedRoute.status,403);
+    // Raw HTTP is needed: undici's fetch overrides the supplied Host header.
+    const forgedHostStatus=await new Promise<number>((resolve,reject)=>{
+      const req=httpRequest({hostname:"127.0.0.1",port,path:"/auth/start/github",
+        headers:{Host:"forged.invalid",Origin:"null"}},response=>{
+        response.resume();response.on("end",()=>resolve(response.statusCode??0));
+      });
+      req.on("error",reject);req.end();
+    });
+    assert.equal(forgedHostStatus,403);
     const keys=await fetch(base+"/api/auth/jwks");
     assert.equal(keys.status,200);
     assert.deepEqual(await keys.json(),{authenticated:false});

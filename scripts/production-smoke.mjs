@@ -53,6 +53,21 @@ assert.doesNotMatch(signInBody,/Continue with Google/,
 const directAuthStart=await fetch("https://kicad-mcp-pro.oaslananka.dev/auth/start/github",options);
 assert.equal(directAuthStart.status,303,"Direct OAuth start GET must return to the sign-in form");
 assert.equal(directAuthStart.headers.get("location"),"/sign-in");
+const opaqueOriginNavigation=await fetch("https://kicad-mcp-pro.oaslananka.dev/auth/start/github",{
+  ...options,headers:{Origin:"null"}
+});
+assert.equal(opaqueOriginNavigation.status,303,"Public GET must redirect even for opaque Origin");
+assert.equal(opaqueOriginNavigation.headers.get("location"),"/sign-in");
+const opaqueSignIn=await fetch("https://kicad-mcp-pro.oaslananka.dev/sign-in",{
+  ...options,headers:{Origin:"null"}
+});
+assert.equal(opaqueSignIn.status,200,"Public sign-in GET must support opaque-Origin navigation");
+const opaquePost=await fetch("https://kicad-mcp-pro.oaslananka.dev/auth/start/github",{
+  method:"POST",redirect:"manual",signal:AbortSignal.timeout(15000),
+  headers:{Origin:"null","Content-Type":"application/x-www-form-urlencoded"},
+  body:"oauth_query="
+});
+assert.equal(opaquePost.status,403,"OAuth POST must still require strict Origin");
 const account=await fetch("https://kicad-mcp-pro.oaslananka.dev/account",options);
 assert.equal(account.status,303,"Anonymous account access must redirect to sign-in");
 assert.equal(account.headers.get("location"),"/sign-in");
