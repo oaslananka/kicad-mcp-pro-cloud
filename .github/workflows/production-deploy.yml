@@ -86,4 +86,7 @@ jobs:
         run: node scripts/production-browser-smoke.mjs
       - name: Responsive workspace UX acceptance
         if: steps.version.outputs.superseded == 'false'
-        run: node scripts/ui-visual-smoke.mjs
+        run: |
+          # This workflow checks out a fresh source tree; compiled UI is not cached.
+          npm run build
+          node scripts/ui-visual-smoke.mjs
