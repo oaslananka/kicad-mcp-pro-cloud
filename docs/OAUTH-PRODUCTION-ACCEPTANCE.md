@@ -81,3 +81,25 @@ https://kicad-mcp-pro.oaslananka.dev/api/auth/callback/github
 and save the new credentials to Doppler. Actual user consent,
 issuer/JWKS checks and PKCE acceptance remain necessary.
 Production Compose still defaults to external mode.
+
+
+## Live GitHub-only authentication activated — 27 October 2026
+
+The OAuth application was registered in GitHub Developer Settings by the owner.
+GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET were transferred from
+Doppler kicad-mcp-pro-cloud/main into the canonical runtime
+kicad-mcp-pro/prd_cloud configuration without printing their values.
+AUTH_MODE=builtin was explicitly stored in canonical Doppler.
+The running application was rebuilt from main and started in builtin mode.
+A tagged copy of the prior external-mode production image was retained
+for immediate rollback. No database migration, device API or WSS
+activation, Tunnel route change or other-application change occurred.
+
+Observed HTTPS behavior: /sign-in served GitHub-only sign-in (HTTP 200),
+/auth/start/github returned HTTP 303 to github.com/login/oauth/authorize
+with the expected public callback hostname and one session cookie,
+Google start route returned 404, OAuth resource metadata/authorization
+discovery returned 200, and unauthenticated /account redirected to
+/sign-in. Real interactive GitHub consent and authenticated session
+have not yet been accepted: require an owner click-through and verify
+the resulting /account session before declaring a completed login.
