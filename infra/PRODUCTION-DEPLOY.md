@@ -66,3 +66,15 @@ parsing is NOT a full restore test. VPS disk loss could destroy both the live
 database and this snapshot. No automated backup cadence or remote retention
 policy is configured yet. A remote destination and restore acceptance are
 needed before storing real customer data.
+
+## Full encrypted restore validation
+
+Cloud now includes scripts/production-restore-drill.sh. It restores the
+production age-encrypted backup into a disposable, isolated, tmpfs-only
+PostgreSQL 17 container and checks checksum ledger, security triggers
+and core metadata against the live DB. It does not modify production.
+See docs/PRODUCTION-DATABASE-RECOVERY-ACCEPTANCE.md.
+
+This is NOT offsite disaster recovery. Migrations 007–012 remain blocked
+until an independently downloaded remote encrypted archive passes
+another full restore. Never treat a same-host backup as offsite.

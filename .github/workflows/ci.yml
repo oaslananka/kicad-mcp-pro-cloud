@@ -35,6 +35,7 @@ jobs:
         run: |
           node --check scripts/production-smoke.mjs
           bash -n scripts/production-backup.sh
+          bash -n scripts/production-restore-drill.sh
       - name: Validate production Compose topology and healthcheck
         run: node scripts/check-production-compose.mjs
       - name: Verify isolated ingress candidate only (offline, synthetic secrets)
