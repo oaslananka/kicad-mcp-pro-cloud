@@ -23,7 +23,9 @@ try{
   for(const [width,height] of [[1440,900],[768,960],[390,844]]){
     const page=await browser.newPage({viewport:{width,height},deviceScaleFactor:1});
     for(const [kind,html] of Object.entries(pages)){
-      await page.setContent(html.replace('<link rel="stylesheet" href="/assets/ui.css"/>',`<style>${uiCss}</style>`));
+      await page.setContent(html);
+      // Add the first-party CSS separately; never interpolate it into HTML.
+      await page.addStyleTag({content:uiCss});
       const metrics=await page.evaluate(()=>({
         fullWidth:document.documentElement.scrollWidth,
         viewport:window.innerWidth,
