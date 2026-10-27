@@ -4,10 +4,12 @@
 set -euo pipefail
 umask 077
 
-if [[ $# -ne 0 ]]; then
-  echo 'Usage: doppler run -p kicad-mcp-pro -c prd_cloud -- bash scripts/production-restore-drill.sh' >&2
+if [[ $# -gt 1 || ( $# -eq 1 && "$1" != "--rehearse-schema" ) ]]; then
+  echo 'Usage: doppler run -p kicad-mcp-pro -c prd_cloud -- bash scripts/production-restore-drill.sh [--rehearse-schema]' >&2
   exit 2
 fi
+rehearse_schema=false
+if [[ "${1:-}" == "--rehearse-schema" ]]; then rehearse_schema=true; fi
 for needed in docker age age-keygen mktemp openssl; do
   command -v "$needed" >/dev/null || { echo 'Restore drill prerequisite unavailable' >&2; exit 2; }
 done
@@ -113,3 +115,56 @@ do
 done
 
 echo 'PASS: encrypted live Cloud backup fully restored to isolated, disposable PostgreSQL 17 RAM; schema ledger, security triggers and metadata counts match production'
+if [[ "$rehearse_schema" == true ]]; then
+  # Run the exact source migration engine against the disposable restored
+  # clone, never a Doppler DATABASE_URL or live production target.
+  [[ -f dist/migrations-cli.js && -f db/012_pairing_device_budget.pgsql ]] || {
+    echo 'Reviewed migration build or manifest unavailable' >&2
+    exit 2
+  }
+  test_image='kicad-mcp-pro-cloud:production'
+  docker image inspect "$test_image" >/dev/null || {
+    echo 'Existing approved runtime image unavailable' >&2
+    exit 2
+  }
+  run_migration(){
+    local action="$1"
+    docker run --rm --network "$network" --entrypoint node \
+      --mount "type=bind,src=$PWD,dst=/app/workspace,readonly" \
+      --workdir /app/workspace \
+      -e "DATABASE_URL=postgresql://restore_fixture:$fixture_pass@$target:5432/restore_fixture" \
+      "$test_image" /app/workspace/dist/migrations-cli.js "$action"
+  }
+  before="$(run_migration --status)"
+  [[ "$before" == *'"current":6'* ]] || {
+    echo 'Restored schema is not reviewed baseline 006' >&2; exit 1;
+  }
+  run_migration --apply >/dev/null
+  after="$(run_migration --status)"
+  [[ "$after" == *'"current":12'* ]] || {
+    echo 'Clone migration failed to reach schema 012' >&2; exit 1;
+  }
+  [[ "$(run_migration --apply)" == "$after" ]] || {
+    echo 'Migrated clone did not apply idempotently' >&2; exit 1;
+  }
+  for table in pairing_challenges device_credentials \
+    device_handshake_challenges connector_sessions \
+    pairing_review_budget pairing_device_budget; do
+    [[ "$(query_target "SELECT to_regclass('$table') IS NOT NULL")" == t ]] || {
+      echo 'Device table absent from migrated clone' >&2; exit 1;
+    }
+  done
+  for q in 'SELECT count(*) FROM devices' \
+    'SELECT count(*) FROM projects' \
+    'SELECT count(*) FROM project_client_grants' \
+    'SELECT count(*) FROM "users"' \
+    'SELECT count(*) FROM "oauthClient"'; do
+    [[ "$(query_live "$q")" == "$(query_target "$q")" ]] || {
+      echo 'Existing metadata count changed after clone migration' >&2; exit 1;
+    }
+  done
+  [[ "$(query_live 'SELECT max(version) FROM schema_migrations')" == 6 ]] || {
+    echo 'Live schema no longer at originally inspected version' >&2; exit 1;
+  }
+  echo 'PASS: production backup clone migrated 006 to 012 safely; counts preserved; repeat apply idempotent'
+fi

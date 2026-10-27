@@ -36,6 +36,10 @@ jobs:
           node --check scripts/production-smoke.mjs
           bash -n scripts/production-backup.sh
           bash -n scripts/production-restore-drill.sh
+          if bash scripts/production-restore-drill.sh --invalid >/dev/null 2>&1; then
+            echo "Restore drill accepted an unsupported action" >&2
+            exit 1
+          fi
       - name: Validate production Compose topology and healthcheck
         run: node scripts/check-production-compose.mjs
       - name: Verify isolated ingress candidate only (offline, synthetic secrets)

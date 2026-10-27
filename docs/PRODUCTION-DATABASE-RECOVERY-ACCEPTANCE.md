@@ -23,6 +23,29 @@ undecryptable snapshots, and fails closed on schema or metadata mismatch.
 Decrypted customer data is streamed only into disposable PostgreSQL
 memory. It never writes a plaintext backup to host disk or exposes ports.
 
+## Production schema 006 to 012 rehearsal — 27 October 2026
+
+The real encrypted production snapshot was fully restored into a
+disposable RAM-only PostgreSQL 17 container. The optional
+--rehearse-schema mode invoked the actual compiled Cloud migration
+CLI using only generated fixture database credentials and the
+existing application runtime image, with repository sources
+mounted read-only.
+
+The clone successfully reached schema 012 from the original 006;
+all six new device/session/budget tables exist, original metadata
+counts remained unchanged, and a repeated apply was idempotent.
+The original live database remains at schema 006.
+
+Operator commands, after a current backup and local build:
+
+    npm run build
+    doppler run -p kicad-mcp-pro -c prd_cloud -- bash scripts/production-restore-drill.sh --rehearse-schema
+
+This mode requires a live source baseline of 006; after production
+migration it must not be reused as a generic backup checker.
+No production migration or independent offsite restore occurred.
+
 ## Offsite recovery remains BLOCKED
 
 The verified backup is on the same VPS as production. An independent

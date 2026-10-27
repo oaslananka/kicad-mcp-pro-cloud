@@ -201,3 +201,7 @@ or production enrollment is available.
 - [ ] Independently recovered offsite encrypted backup and full restore.
       Agent-mediated R2 transfer was blocked by tool safety policy.
 - [ ] Controlled production migrations 007–012 after offsite recovery.
+
+- [x] Actual encrypted production snapshot migrated 006 to 012
+      in disposable PostgreSQL 17 RAM; source metadata preserved,
+      replay idempotent and live schema still 006 (27 Oct 2026).
