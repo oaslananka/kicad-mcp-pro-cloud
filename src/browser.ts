@@ -26,7 +26,23 @@ async function checkedOAuthQuery(identity:BrowserIdentity,signed:string):Promise
   const {secret}=await identity.$context;
   return verifyOAuthQueryParams(signed,secret);
 }
+const trackingParams=new Set([
+  "utm_source","utm_medium","utm_campaign","utm_term","utm_content"
+]);
+function trackingOnlySignInQuery(url:URL):boolean {
+  if(!url.search || url.search.length>1024)return false;
+  const keys=Array.from(url.searchParams.keys());
+  return keys.length>0 && keys.length<=5 && keys.every(key=>trackingParams.has(key));
+}
 async function signInPage(url:URL,identity:BrowserIdentity):Promise<Response> {
+  // Links from chat clients may append UTM metadata. Strip only an
+  // exclusively-marketing query, never a mixed or signed OAuth request.
+  if(trackingOnlySignInQuery(url)){
+    return new Response(null,{
+      status:303,
+      headers:{"Location":"/sign-in","Cache-Control":"no-store"}
+    });
+  }
   const signed=url.search.slice(1);
   if(signed && !(await checkedOAuthQuery(identity,signed))) {
     return page("Invalid or expired authorization request","Restart the connection from your AI client.",400);
