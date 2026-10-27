@@ -56,8 +56,8 @@ device signatures; no KiCad remote command dispatcher is exposed.
   than silently trusting another container's new IP.
 - Only after the above, independently verify migration ledger 007–012,
   safe backup/restore, real OAuth and native device interoperability.
-  Production is currently `AUTH_MODE=external`; feature flags OFF and
-  pairing database tables absent.
+  Production now runs `AUTH_MODE=builtin` with GitHub + ChatGPT OAuth,
+  migration ledger 012, and device/WSS feature flags still OFF.
 
 No proxy/container addresses or sensitive operational network layout are
 committed here; discover them through authorized read-only Ops inspection.

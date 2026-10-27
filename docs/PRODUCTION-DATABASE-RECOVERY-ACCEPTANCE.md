@@ -1,8 +1,9 @@
 # Cloud production database full-restore acceptance
 
-Verified 27 October 2026. Live PostgreSQL 17 schema ledger: 001–006.
-Production HTTPS, assets, health, MCP discovery, anonymous 401 and
-disabled sign-in smoke tests passed.
+Updated 27 October 2026. The live PostgreSQL 17 schema ledger is now
+**001–012** after a reviewed, transactional, schema-only release.
+Production HTTPS, GitHub sign-in, ChatGPT OAuth, assets, health, MCP
+resource discovery, anonymous 401 and disabled-device UI passed.
 
 A fresh age-encrypted production pg_dump was created using the authorized
 Doppler project kicad-mcp-pro, config prd_cloud. The encrypted snapshot
@@ -35,7 +36,8 @@ mounted read-only.
 The clone successfully reached schema 012 from the original 006;
 all six new device/session/budget tables exist, original metadata
 counts remained unchanged, and a repeated apply was idempotent.
-The original live database remains at schema 006.
+This historical rehearsal ran before the live schema-only migration.
+Production later advanced to schema 012, separately verified below.
 
 Operator commands, after a current backup and local build:
 
@@ -44,7 +46,9 @@ Operator commands, after a current backup and local build:
 
 This mode requires a live source baseline of 006; after production
 migration it must not be reused as a generic backup checker.
-No production migration or independent offsite restore occurred.
+At the time of this initial rehearsal, no production migration or independent
+offsite restore had occurred. Both milestones were independently completed
+later on 27 October 2026, as recorded below.
 
 ## Independent encrypted offsite recovery — ACCEPTED 27 October 2026
 
@@ -89,24 +93,62 @@ missing source receipt, file permission error, invalid key, bad checksum,
 unfinished PostgreSQL initialization, invalid migration ledger or missing
 security fences.
 
-**Operational limitation:** this proof is an independent point-in-time restore,
-not proof of recurring offsite backup scheduling, retention or automated alerts.
-The second workstation can be offline. A recurring owner-approved destination,
-key-recovery policy and failure alert must be established for sustained
-production disaster recovery; do not silently re-enable previously denied
-R2 egress or assume a same-host copy meets this requirement.
+### Production schema 012 migration acceptance — 27 October 2026
+
+After the independent recovery acceptance, a **second fresh encrypted
+snapshot** was copied to the same independently controlled offsite destination
+and recovered in another fresh network-isolated, RAM-only PostgreSQL 17
+container. Matching source/ciphertext SHA-256 and full schema-006 ledger and
+three OAuth fences were confirmed immediately before the bounded migration.
+
+The production application `main` release had passed exact-head GitHub CI,
+Production Deployment, real Chromium sign-in, and responsive layout checks.
+The existing migration engine applied all 007–012 files **in one PostgreSQL
+transaction**. No application, Tunnel, OAuth provider setting, WSS or device
+pairing flag was changed. The live database returned `current=12`,
+`pending=[]`; all six expected tables exist, and original user/OAuth/client
+record counts remained intact. Real browser `/account`, `/connections`,
+`/devices`, original MCP anonymous-401, and server health passed.
+
+A **fresh post-migration snapshot** was then copied to the independent
+workstation and independently restored again. Receipt:
+
+- SHA-256 `045a80f7abb4254d999e5a2623ca1e71b19f1d7ac2b4f1ca0bfac8264e8bc245`
+- Schema ledger `12:a75d9e512df4f9701d60babcd9544622`
+- OAuth security fences `3`, independent full `pg_restore` PASS
+- Encrypted offsite archive mode 0600, temporary RAM-only container removed
+
+### Ongoing offsite backup operations
+
+`scripts/offsite-backup-push.sh` uses authenticated, pinned-host SSH to an
+operator-owned private destination, copies **only age ciphertext**, confirms
+the source SHA-256, runs a full independent restore via the second host's
+own Doppler credentials, and then retains the last **three** project-owned
+ciphertexts. It does not handle any other project's backups.
+
+The per-host settings are outside Git:
+
+    OFFSITE_REMOTE_SSH=<approved-user>@<trusted-private-ip>
+    OFFSITE_REMOTE_DIR=/private/approved/kicad-cloud/offsite
+
+Use a mode-0600 user environment file; `scripts/install-offsite-backup-timer.sh`
+installs the one-project `systemd --user` daily timer. Run one scheduled
+service acceptance and verify retention and unit status before declaring
+automatic protection operational. If the independent machine is offline,
+the job **fails visibly** and must be retried; no failed backup is silently
+counted as accepted. A separate user-visible stale-backup alert is desirable.
+
+Do not silently re-enable previously blocked R2 data egress, assume an
+always-on workstation, or imply enterprise-grade disaster recovery.
 
 ## Migration gate
 
-Pending migrations 007–012 remain unapplied in production. The **independent
-restore proof** is now available; the remaining gates are the currently
-reviewed application image and schema manifest, an explicit bounded
-migration/recovery window, and successful post-migration authentication,
-project inventory and owner-UI smoke tests. Preserve the **currently working
-built-in GitHub and ChatGPT OAuth mode** (do not switch to external auth)
-and keep pairing-device API and connector WSS flags OFF throughout the
-schema-only migration. Do not combine it
-with Cloudflare Tunnel cutover or provider OAuth rollout.
+The database-only migration gate was accepted and **production is on 012**.
+This does **not** enable device enrollment or remote KiCad execution.
+Preserve the working built-in GitHub and ChatGPT OAuth mode. Pairing-device
+API and connector WSS feature flags stay OFF until separate dedicated Tunnel,
+source provenance, edge rate limiting and real-device connection acceptance.
+Do not combine network cutover or remote device rollout with DB migration.
 
 The current full-restore proof is stronger than the old archive-parser
 check, but it is not disaster recovery by itself.

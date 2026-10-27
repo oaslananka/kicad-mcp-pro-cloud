@@ -1,8 +1,10 @@
-# KiCad Cloud — Cloudflare edge release acceptance (no live changes)
+# KiCad Cloud — Cloudflare edge release acceptance (device traffic blocked)
 
-This is a **read-only evidence contract**, not a Cloudflare ruleset
-deployment. It does not retrieve tokens, modify the shared Tunnel, update
-DNS, change app or PostgreSQL config, or enable pairing/WSS.
+This is a fail-closed edge release contract, not authorization to enable
+device traffic. On 27 October 2026 the **inactive dedicated** KiCad Tunnel's
+own remote ingress mapping was staged; public DNS still points to the
+untouched shared Tunnel. No connector token was retrieved, and no rate rule,
+DNS, application or other host configuration was changed.
 
 ## Last live read-only observations — 27 October 2026
 
@@ -98,9 +100,12 @@ other three hostnames and leaked-credential rate rule must remain intact.
 The existing origin topology fails its own read-only
 `ingress:preflight`; the proposed candidate in
 `infra/compose.isolated-ingress.candidate.yml` is **offline only**.
-No production migrations 007–012, OAuth providers, WSS/device flags, or
-physical KiCad acceptance are complete. An encrypted offsite backup and
-actual full restore are separate prerequisites.
+Production DB migration 007–012 and independent encrypted offsite full
+restore are complete. GitHub/ChatGPT OAuth works, but **WSS and device API are
+still disabled**, dedicated origin isolation is not active, and the required
+independent edge throttling has not been accepted on the Free zone. Physical
+KiCad client acceptance has not occurred. The origin preflight must remain
+BLOCKED until its own separate real connection and edge evidence succeeds.
 
 Primary Cloudflare references:
 

@@ -37,6 +37,8 @@ jobs:
           bash -n scripts/production-backup.sh
           bash -n scripts/production-restore-drill.sh
           bash -n scripts/offsite-restore-verify.sh
+          bash -n scripts/offsite-backup-push.sh
+          bash -n scripts/install-offsite-backup-timer.sh
           bash -n scripts/production-deploy-if-ready.sh
           bash -n scripts/install-production-deploy-timer.sh
           node --check scripts/production-browser-smoke.mjs
