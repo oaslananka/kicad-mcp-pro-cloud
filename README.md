@@ -42,6 +42,16 @@ Official references:
 - https://ts.sdk.modelcontextprotocol.io/v2/serving/http
 - https://developers.openai.com/plugins/build/auth
 
+## Portable production deployment
+
+The Cloud can be deployed to a new owner-controlled Linux VPS and HTTPS domain
+using a dedicated Doppler config, a scoped VPS bootstrap service token, the
+single GitHub `DOPPLER_TOKEN` secret and an optional separately managed
+Cloudflare Tunnel container. It is a **guarded first-install workflow**, not a
+claim of zero-touch cloud provisioning or validated migration to every VPS.
+Existing production retains its shared Tunnel and update timer unchanged.
+See [portable VPS/deployment runbook](infra/PORTABLE-DEPLOY.md).
+
 ## Doppler-only runtime settings
 
 All runtime settings and secrets are read from the Doppler project at process

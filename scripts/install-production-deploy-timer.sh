@@ -15,6 +15,7 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=$root
 ExecStart=/usr/bin/bash $root/scripts/production-deploy-if-ready.sh
+Environment=KICAD_DOPPLER_SCOPED=${KICAD_DOPPLER_SCOPED:-false}
 TimeoutStartSec=480
 UNIT
 cat > "$units/kicad-cloud-production.timer" <<'UNIT'

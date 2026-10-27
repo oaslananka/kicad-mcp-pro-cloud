@@ -16,13 +16,27 @@ cd "$root"
 ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=8)
 remote="$OFFSITE_REMOTE_SSH"
 dir="$OFFSITE_REMOTE_DIR"
+# The independent restore machine may use a different Doppler project/config.
+# These nonsecret selectors are supplied by the SOURCE deployment's Doppler.
+restore_project=${OFFSITE_RESTORE_DOPPLER_PROJECT:-kicad-mcp-pro}
+restore_config=${OFFSITE_RESTORE_DOPPLER_CONFIG:-prd_cloud}
+[[ "$restore_project" =~ ^[A-Za-z0-9_-]{1,100}$ &&
+   "$restore_config" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || {
+  echo 'Invalid independent restore Doppler project/config selector' >&2; exit 2
+}
 # No shared/other-application backup objects are ever deleted.
 ssh "${ssh_opts[@]}" "$remote" bash -s -- "$dir" <<'REMOTE'
 set -euo pipefail
 [ -d "$1" ] && [ ! -L "$1" ] && [ "$(stat -c %a "$1")" = 700 ]
 REMOTE
-# Re-encrypt from the live database with existing Doppler-held identity.
-doppler run -p kicad-mcp-pro -c prd_cloud -- bash scripts/production-backup.sh
+# Re-encrypt using this deployment's Doppler-selected configuration.
+# A Doppler-wrapped invocation already has the required age identity; do not
+# create a nested Doppler process or change its source of truth.
+if [[ -n "${KICAD_BACKUP_AGE_IDENTITY:-}" && -n "${KICAD_BACKUP_AGE_RECIPIENT:-}" ]]; then
+  bash scripts/production-backup.sh
+else
+  scripts/doppler-runtime.sh bash scripts/production-backup.sh
+fi
 src="$HOME/.local/share/kicad-cloud/backups/production-db-latest.pg.age"
 [[ -f "$src" && ! -L "$src" && "$(stat -c %a "$src")" == 600 ]]
 sha=$(sha256sum "$src" | awk '{print $1}')
@@ -52,7 +66,7 @@ REMOTE
 # identity is acquired from the *remote* host's own Doppler session.
 ssh "${ssh_opts[@]}" "$remote" env \
   "EXPECTED_SHA256=$sha" "EXPECTED_SCHEMA_VERSION=$version" "EXPECTED_LEDGER=$ledger" \
-  doppler run -p kicad-mcp-pro -c prd_cloud -- bash -s -- "$dir/$filename" \
+  doppler run -p "$restore_project" -c "$restore_config" -- bash -s -- "$dir/$filename" \
   < scripts/offsite-restore-verify.sh
 # Retain three latest project-only ciphertext versions. Delete nothing on an
 # unsuccessful checksum or full independent restore.

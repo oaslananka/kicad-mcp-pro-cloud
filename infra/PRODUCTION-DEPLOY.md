@@ -1,5 +1,14 @@
 # Production deployment: CI-gated, VPS-executed, audited in Actions
 
+This file describes the **existing** VPS's current legacy network and production
+rollout. For a fresh VPS/domain, use [PORTABLE-DEPLOY.md](PORTABLE-DEPLOY.md).
+Current app/Tunnel source and GitHub workflow preserve existing behavior.
+Public acceptance now resolves `PUBLIC_ORIGIN` via the GitHub's single
+production-scoped `DOPPLER_TOKEN`, while the VPS release timer reads the same
+configured destination through Doppler. Existing legacy Doppler selectors
+remain default unless a VPS-scoped service token is explicitly configured.
+
+
 No staging environment. Docker Compose retains one active KiCad image
 (`kicad-mcp-pro-cloud:production`), one previous rollback image
 (`kicad-mcp-pro-cloud:rollback`), and the PostgreSQL 17 service. There is

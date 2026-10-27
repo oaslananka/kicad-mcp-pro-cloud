@@ -20,7 +20,6 @@ jobs:
     timeout-minutes: 12
     environment:
       name: production
-      url: https://kicad-mcp-pro.oaslananka.dev/
     env:
       EXPECTED_REVISION: ${{ github.event.workflow_run.head_sha }}
     steps:
@@ -37,8 +36,36 @@ jobs:
           else
             echo 'superseded=false' >> "$GITHUB_OUTPUT"
           fi
+      - uses: actions/checkout@v4
+        if: steps.version.outputs.superseded == 'false'
+        with:
+          persist-credentials: false
+      - name: Verify checked-out trusted main revision
+        if: steps.version.outputs.superseded == 'false'
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_REVISION"
+      - uses: actions/setup-node@v4
+        if: steps.version.outputs.superseded == 'false'
+        with:
+          node-version: '24'
+      - name: Install official Doppler CLI
+        if: steps.version.outputs.superseded == 'false'
+        uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4 pinned
+      - name: Resolve production HTTPS origin from Doppler
+        id: destination
+        if: steps.version.outputs.superseded == 'false'
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$DOPPLER_TOKEN" || { echo 'Production-scoped Doppler service token required'; exit 1; }
+          origin=$(doppler run -- node scripts/portable-config.mjs origin)
+          google=$(doppler run -- node scripts/portable-config.mjs google)
+          echo "origin=$origin" >> "$GITHUB_OUTPUT"
+          echo "google=$google" >> "$GITHUB_OUTPUT"
       - name: Await VPS release and verify exact revision
         if: steps.version.outputs.superseded == 'false'
+        env:
+          PUBLIC_ORIGIN: ${{ steps.destination.outputs.origin }}
         run: |
           set -euo pipefail
           # The dedicated VPS timer reads this same successful main CI run,
@@ -46,7 +73,7 @@ jobs:
           for attempt in $(seq 1 40); do
             if curl --fail --silent --show-error --max-time 10 --retry 0 \
               --output "$RUNNER_TEMP/kicad-cloud-health.json" \
-              https://kicad-mcp-pro.oaslananka.dev/health; then
+              "${PUBLIC_ORIGIN}/health"; then
               live=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("revision","unknown"))' \
                 "$RUNNER_TEMP/kicad-cloud-health.json") || live=unreachable
             else
@@ -61,18 +88,6 @@ jobs:
           done
           echo 'Deployment not verified; production job fails closed.' >&2
           exit 1
-      - uses: actions/checkout@v4
-        if: steps.version.outputs.superseded == 'false'
-        with:
-          # workflow_run GITHUB_SHA is default-branch code, never PR HEAD.
-          persist-credentials: false
-      - name: Verify checked-out trusted main revision
-        if: steps.version.outputs.superseded == 'false'
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_REVISION"
-      - uses: actions/setup-node@v4
-        if: steps.version.outputs.superseded == 'false'
-        with:
-          node-version: '24'
       - name: Install Chromium for real first-party login acceptance
         if: steps.version.outputs.superseded == 'false'
         run: |
@@ -80,9 +95,14 @@ jobs:
           ./node_modules/.bin/playwright install --with-deps chromium
       - name: Independent public production smoke
         if: steps.version.outputs.superseded == 'false'
+        env:
+          PUBLIC_ORIGIN: ${{ steps.destination.outputs.origin }}
+          EXPECTED_GOOGLE_OAUTH: ${{ steps.destination.outputs.google }}
         run: node scripts/production-smoke.mjs
       - name: Native Chromium GitHub login form acceptance
         if: steps.version.outputs.superseded == 'false'
+        env:
+          PUBLIC_ORIGIN: ${{ steps.destination.outputs.origin }}
         run: node scripts/production-browser-smoke.mjs
       - name: Responsive workspace UX acceptance
         if: steps.version.outputs.superseded == 'false'

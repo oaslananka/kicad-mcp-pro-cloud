@@ -1,5 +1,10 @@
 # Production infrastructure
 
+For a NEW server/domain, start with [Portable Doppler-first deployment](PORTABLE-DEPLOY.md).
+For the CURRENT verified production VPS, follow [Production deployment](PRODUCTION-DEPLOY.md).
+Never run the fresh-install workflow against the existing app/database.
+
+
 The reviewed production Docker Compose deployment now runs on the existing
 VPS and healthy Cloudflare Tunnel at:
 https://kicad-mcp-pro.oaslananka.dev

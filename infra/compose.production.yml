@@ -40,6 +40,8 @@ services:
       HOST: 0.0.0.0
       PORT: "8787"
       NODE_ENV: production
+      MANAGEMENT_CLIENT_ID: ${MANAGEMENT_CLIENT_ID:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
     networks:
       - database
       - tunnel
@@ -70,4 +72,4 @@ networks:
     internal: true
   tunnel:
     external: true
-    name: ops_internal
+    name: ${KICAD_TUNNEL_NETWORK:-ops_internal}
