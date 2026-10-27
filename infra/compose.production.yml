@@ -31,7 +31,12 @@ services:
       OAUTH_AUDIENCE: ${OAUTH_AUDIENCE:?Required Doppler value}
       DATABASE_URL: postgresql://kicad_cloud@db:5432/kicad_cloud
       PGPASSWORD: ${KICAD_DB_PASSWORD:?Required Doppler value}
-      AUTH_MODE: external
+      AUTH_MODE: ${AUTH_MODE:-external}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       HOST: 0.0.0.0
       PORT: "8787"
       NODE_ENV: production

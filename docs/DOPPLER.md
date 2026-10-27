@@ -73,9 +73,11 @@ Doppler. Do not invent a provider client id before client registration.
 ## Built-in identity foundation (disabled until verified)
 
 A Better Auth authorization server is optional. AUTH_MODE defaults to external.
-For test/staging, AUTH_MODE=builtin requires BETTER_AUTH_SECRET and real values
-for GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GITHUB_CLIENT_ID and
-GITHUB_CLIENT_SECRET. All these static runtime credentials must live in Doppler.
+For first GitHub-only rollout, AUTH_MODE=builtin requires
+BETTER_AUTH_SECRET plus GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.
+GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are optional until Google sign-in
+is separately registered. If a provider is partially configured, startup
+fails closed. The default remains AUTH_MODE=external. All these static runtime credentials must live in Doppler.
 
 With built-in auth, OAUTH_ISSUER must equal PUBLIC_ORIGIN + /api/auth and
 OAUTH_JWKS_URL must equal PUBLIC_ORIGIN + /api/auth/jwks. OAUTH_AUDIENCE

@@ -2,7 +2,14 @@ import { verifyOAuthQueryParams } from "@better-auth/oauth-provider";
 import type { Identity } from "./identity.js";
 import {renderSignIn,renderAccount,renderNotice} from "./browser-ui.js";
 
-export type BrowserIdentity = Pick<Identity,"handler"> & Partial<Pick<Identity,"$context"|"api">>;
+export type BrowserIdentity =
+  Pick<Identity,"handler"> & Partial<Pick<Identity,"$context"|"api"|"options">>;
+type SocialName="google"|"github";
+function availableProviders(identity:BrowserIdentity):SocialName[]{
+  const social=identity.options?.socialProviders;
+  if(!social)return ["google","github"]; // test-only handler mocks
+  return (["google","github"] as const).filter(name=>Boolean(social[name]));
+}
 const htmlHeaders = {
   "Content-Type":"text/html; charset=utf-8",
   "Cache-Control":"no-store",
@@ -24,7 +31,7 @@ async function signInPage(url:URL,identity:BrowserIdentity):Promise<Response> {
   if(signed && !(await checkedOAuthQuery(identity,signed))) {
     return page("Invalid or expired authorization request","Restart the connection from your AI client.",400);
   }
-  return new Response(renderSignIn(signed),{status:200,headers:htmlHeaders});
+  return new Response(renderSignIn(signed,availableProviders(identity)),{status:200,headers:htmlHeaders});
 }
 
 async function signedLoginForm(request:Request,identity:BrowserIdentity,publicOrigin:string):Promise<string|Response> {
@@ -92,6 +99,9 @@ export async function browserResponse(request:Request,identity:BrowserIdentity,p
   if (url.pathname === "/auth/start/google") provider = "google";
   else if (url.pathname === "/auth/start/github") provider = "github";
   if(provider && request.method==="POST") {
+    if(!availableProviders(identity).includes(provider)){
+      return page("Sign-in unavailable","This provider is not enabled.",404);
+    }
     return startSocialLogin(request,identity,publicOrigin,provider);
   }
   if(url.pathname==="/account" && request.method==="GET") return accountPage(request,identity);

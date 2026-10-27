@@ -29,15 +29,18 @@ handler, Better Auth 1.7.13 and disposable PostgreSQL 17. It verifies:
 
 ## Remaining direct production activation gates
 
-1. Register the production Google OAuth Web client with authorized redirect:
-   https://kicad-mcp-pro.oaslananka.dev/api/auth/callback/google
-2. Register the production GitHub OAuth App with callback:
+1. Register the production GitHub OAuth App with callback:
    https://kicad-mcp-pro.oaslananka.dev/api/auth/callback/github
-3. Store GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GITHUB_CLIENT_ID,
-   GITHUB_CLIENT_SECRET only in Doppler config prd_cloud. BETTER_AUTH_SECRET
-   already exists in that config. GitHub Secrets contains only DOPPLER_TOKEN.
-4. Review a production-safe explicit AUTH_MODE=builtin activation change;
-   the initial production Compose intentionally fixes AUTH_MODE=external.
+2. Store GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET only in Doppler config
+   prd_cloud. BETTER_AUTH_SECRET already exists. GitHub Secrets contains
+   only DOPPLER_TOKEN. A Google OAuth Web client is optional for initial
+   login and may be registered later with callback
+   https://kicad-mcp-pro.oaslananka.dev/api/auth/callback/google.
+3. Verify the exact public issuer/JWKS, production backup and selected
+   auth provider. The Compose default remains AUTH_MODE=external;
+   enabling AUTH_MODE=builtin is a separate controlled setting change.
+4. Review a production-safe explicit AUTH_MODE=builtin activation;
+   never use placeholder provider IDs or a partial credential pair.
    The user should not be able to sign in before the credentials, issuer,
    sessions, redirect/cookie security and OAuth client integration work.
 5. Verify real Google and GitHub login/callback state, exact consent scopes,
@@ -62,3 +65,19 @@ have separate requirements. A single same-host encrypted archive is not
 sufficient for disaster recovery and archive parsing is not a full restore.
 See infra/PRODUCTION-DEPLOY.md. No staging, extra app images or automatic
 schema migrations are required for this deployment model.
+
+
+## Faster first-login release (GitHub only)
+
+The Cloud application now supports one complete configured social OAuth
+provider. For the first working version, a real GitHub OAuth client ID
+and client secret plus the existing BETTER_AUTH_SECRET are sufficient;
+Google can be added later. Any partially configured provider blocks
+startup, and disabled provider links and login routes are unavailable.
+
+This does not register an app or authenticate a real user.
+The official GitHub developer OAuth UI must register the exact callback
+https://kicad-mcp-pro.oaslananka.dev/api/auth/callback/github
+and save the new credentials to Doppler. Actual user consent,
+issuer/JWKS checks and PKCE acceptance remain necessary.
+Production Compose still defaults to external mode.

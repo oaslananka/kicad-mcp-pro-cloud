@@ -29,6 +29,15 @@ test("sign-in presents both providers without altering signed parameters",()=>{
   assert.match(page,/client_id=trusted%26scope=openid/);
   assert.doesNotMatch(page,/<script[\s>]/i);
 });
+test("first login presents only the configured provider",()=>{
+  const github=renderSignIn("",["github"]);
+  assert.match(github,/Continue with GitHub/);
+  assert.doesNotMatch(github,/Continue with Google/);
+  const google=renderSignIn("",["google"]);
+  assert.match(google,/Continue with Google/);
+  assert.doesNotMatch(google,/Continue with GitHub/);
+});
+
 test("user, client and scope content cannot inject HTML into premium pages",()=>{
   const attack='<script>alert("x")</script>';
   const account=renderAccount(attack);

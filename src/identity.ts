@@ -22,9 +22,12 @@ export function createIdentity(
   credentials: IdentitySecrets,
   pool?: pg.Pool
 ) {
-  if (credentials.secret.length < 32 || !credentials.googleId || !credentials.googleSecret ||
-      !credentials.githubId || !credentials.githubSecret) {
-    throw new Error("Identity provider requires an encryption secret and both social OAuth credentials");
+  const googleConfigured=Boolean(credentials.googleId&&credentials.googleSecret);
+  const githubConfigured=Boolean(credentials.githubId&&credentials.githubSecret);
+  if (credentials.secret.length < 32 || (!googleConfigured&&!githubConfigured) ||
+      Boolean(credentials.googleId)!==Boolean(credentials.googleSecret) ||
+      Boolean(credentials.githubId)!==Boolean(credentials.githubSecret)) {
+    throw new Error("Identity requires a secret and at least one complete social OAuth provider");
   }
   return betterAuth({
     baseURL: config.publicOrigin,
@@ -51,8 +54,12 @@ export function createIdentity(
     emailAndPassword: { enabled: false },
     user: { modelName: "users" },
     socialProviders: {
-      google: { clientId: credentials.googleId, clientSecret: credentials.googleSecret },
-      github: { clientId: credentials.githubId, clientSecret: credentials.githubSecret }
+      ...(googleConfigured?{google:{
+        clientId:credentials.googleId,clientSecret:credentials.googleSecret
+      }}:{}),
+      ...(githubConfigured?{github:{
+        clientId:credentials.githubId,clientSecret:credentials.githubSecret
+      }}:{})
     },
     account: {
       encryptOAuthTokens: true,
