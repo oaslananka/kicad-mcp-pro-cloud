@@ -1,9 +1,7 @@
 name: CodSpeed
+# Benchmarks are opt-in only. PR/merge CI focuses on build, tests, and security.
+# Runners fluctuate and unrelated benchmarks must not block the first login.
 on:
-  push:
-    branches: [main]
-  pull_request:
-  # Allows CodSpeed to trigger backtest performance analysis to generate initial data.
   workflow_dispatch:
 permissions:
   contents: read
