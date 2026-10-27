@@ -46,29 +46,66 @@ This mode requires a live source baseline of 006; after production
 migration it must not be reused as a generic backup checker.
 No production migration or independent offsite restore occurred.
 
-## Offsite recovery remains BLOCKED
+## Independent encrypted offsite recovery — ACCEPTED 27 October 2026
 
-The verified backup is on the same VPS as production. An independent
-offsite encrypted copy has NOT been created or restored. The connected
-tooling blocked the attempt to transmit encrypted ciphertext to R2;
-do not bypass those controls. The private R2 bucket was observed to
-have no public custom domain and r2.dev disabled, but this does not
-prove that a backup object exists there.
+The previously blocking proof has now been performed on a **second
+owner-controlled machine** over an existing authenticated, private Tailscale
+SSH connection. No public SSH listener or new cloud billing was introduced.
 
-An authorized independent backup operator must upload only the
-already-encrypted archive, download it again, confirm matching bytes,
-then perform full PostgreSQL restore from that independently recovered
-copy. Protect age identity custody independently of the VPS and
-establish retention, periodic execution and alerts. Do not delete or
-alter other applications' remote backup objects.
+1. The production database generated a fresh age-encrypted snapshot using
+   authorized Doppler keys. The source instance passed its existing full
+   isolated PostgreSQL 17 restore drill.
+2. **Only encrypted ciphertext** was copied to a separate workstation. Both
+   ends reported identical SHA-256 digest
+   `a119dc0904e365907aaa0b5d09a6d948ae8f2f3b56218e97fa565e4bbe9fcf9d`.
+   The remote private file is mode 0600 and its directory mode 0700.
+3. The independent machine obtained the age recovery identity directly from
+   its **own** authorized Doppler session, not from the production VPS or the
+   transferred archive. The secret was staged only in RAM and removed.
+4. In a separately launched PostgreSQL 17 container with `--network none`
+   and RAM-only database, a full `pg_restore --exit-on-error` succeeded.
+   Recovery returned schema 006, ledger checksum
+   `6:8c60b4f1f7adfffce2015b4fd484ca31`, three OAuth security triggers,
+   and exact source-side core metadata counts (one account, one client,
+   one consent and no devices/projects/grants). The temporary database and
+   container were deleted without publishing a port. No plaintext archive
+   was saved on either persistent host disk.
+5. The existing production database, ingress, live image and OAuth grants
+   were unchanged throughout the independent recovery test.
+
+Repeatable, secret-free verification code is
+`scripts/offsite-restore-verify.sh`. On the **independent** host, after an
+operator transfers a fresh age ciphertext over an explicitly authorized
+channel and records the source hash and ledger receipt:
+
+    EXPECTED_SHA256=<source-sha256> EXPECTED_SCHEMA_VERSION=6 \
+      EXPECTED_LEDGER=<source-count:ledger-md5> \
+      doppler run -p kicad-mcp-pro -c prd_cloud -- \
+      bash scripts/offsite-restore-verify.sh /private/offsite-snapshot.pg.age
+
+The sample path is not an instruction to share age identities, credentials,
+user data or internal machine names with GitHub. The test fails closed on a
+missing source receipt, file permission error, invalid key, bad checksum,
+unfinished PostgreSQL initialization, invalid migration ledger or missing
+security fences.
+
+**Operational limitation:** this proof is an independent point-in-time restore,
+not proof of recurring offsite backup scheduling, retention or automated alerts.
+The second workstation can be offline. A recurring owner-approved destination,
+key-recovery policy and failure alert must be established for sustained
+production disaster recovery; do not silently re-enable previously denied
+R2 egress or assume a same-host copy meets this requirement.
 
 ## Migration gate
 
-Pending migrations 007–012 remain unapplied in production. Applying
-them requires verified offsite restore evidence, active-image
-compatibility, an explicit migration/rollback window and a successful
-post-migration smoke test. Keep AUTH_MODE=external and pairing/WSS
-feature flags OFF during database-only migration. Do not combine it
+Pending migrations 007–012 remain unapplied in production. The **independent
+restore proof** is now available; the remaining gates are the currently
+reviewed application image and schema manifest, an explicit bounded
+migration/recovery window, and successful post-migration authentication,
+project inventory and owner-UI smoke tests. Preserve the **currently working
+built-in GitHub and ChatGPT OAuth mode** (do not switch to external auth)
+and keep pairing-device API and connector WSS flags OFF throughout the
+schema-only migration. Do not combine it
 with Cloudflare Tunnel cutover or provider OAuth rollout.
 
 The current full-restore proof is stronger than the old archive-parser

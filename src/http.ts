@@ -106,7 +106,7 @@ async function handleRequest(
         } else if (path==="/connections" || path==="/connections/revoke") {
           answer=await connectionsResponse(browserRequest,identity,config.publicOrigin,grants);
         } else if(path==="/devices" || path==="/devices/revoke"){
-          answer=await devicesResponse(browserRequest,identity,config.publicOrigin,devices);
+          answer=await devicesResponse(browserRequest,identity,config.publicOrigin,devices,Boolean(pairingDevice));
         } else if(path==="/devices/pairing" || path==="/devices/pairing/review"){
           answer=await pairingBrowserResponse(browserRequest,identity,config.publicOrigin,pairings);
         } else {

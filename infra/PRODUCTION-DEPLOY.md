@@ -133,6 +133,12 @@ database and this snapshot. No automated backup cadence or remote retention
 policy is configured yet. A remote destination and restore acceptance are
 needed before storing real customer data.
 
+The existing backup and full local restore can be complemented by the
+separate-machine verification documented in
+[Production database recovery acceptance](../docs/PRODUCTION-DATABASE-RECOVERY-ACCEPTANCE.md).
+Only encrypted archives cross machine boundaries; the independent host uses
+its own Doppler identity and an isolated RAM-only PostgreSQL restore.
+
 ## Full encrypted restore validation
 
 Cloud now includes scripts/production-restore-drill.sh. It restores the

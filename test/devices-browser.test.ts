@@ -120,3 +120,21 @@ test("no device manager cannot mutate devices",async()=>{
   const token=csrf(await r!.text()),cookie=(r!.headers.get("set-cookie")??"").split(";")[0];
   assert.equal((await devicesResponse(submit(f.ownId,token,cookie),f.identity,origin))?.status,503);
 });
+
+test("schema-ready inventory remains disabled without explicitly enabled device pairing",async()=>{
+  const empty=fixture("owner-b");
+  const gated=await devicesResponse(new Request(origin+"/devices"),empty.identity,origin,empty.devices,false);
+  assert.equal(gated?.status,200);
+  const html=await gated!.text();
+  assert.match(html,/not enabled on this deployment/);
+  assert.doesNotMatch(html,/href="\/devices\/pairing"/);
+  assert.doesNotMatch(html,/action="\/devices\/revoke"/);
+  // Existing users must retain credential-revocation even if new enrollment
+  // is disabled. Do not hide live devices behind a feature flag.
+  const existing=fixture();
+  const response=await devicesResponse(new Request(origin+"/devices"),existing.identity,origin,existing.devices,false);
+  assert.equal(response?.status,200);
+  const detail=await response!.text();
+  assert.match(detail,/Revoke device/);
+  assert.doesNotMatch(detail,/href="\/devices\/pairing"/);
+});

@@ -62,7 +62,7 @@ async function checkCsrf(req:Request,origin:string,secret:string,
   return a.length===b.length&&timingSafeEqual(a,b);
 }
 async function list(req:Request,identity:BrowserIdentity,origin:string,
-  devices:DeviceManagementPort):Promise<Response>{
+  devices:DeviceManagementPort,enrollmentAvailable=true):Promise<Response>{
   if(!identity.api||!identity.$context)return error(503);
   const who=userOf(await identity.api.getSession({headers:req.headers}));
   if(!who)return new Response(null,{status:303,headers:{"Location":"/sign-in","Cache-Control":"no-store"}});
@@ -80,7 +80,7 @@ async function list(req:Request,identity:BrowserIdentity,origin:string,
     csrf:await csrf(secret,who.user,who.session,d.id,stamp,nonce)})));
   const note=new URL(req.url).searchParams.has("revoked")?
     "Device key revoked; its sessions and associated project/client permissions were disabled.":undefined;
-  return reply(200,rows,note,cookie(stamp+"."+nonce,origin,300));
+  return reply(200,rows,note,cookie(stamp+"."+nonce,origin,300),enrollmentAvailable);
 }
 async function revoke(req:Request,identity:BrowserIdentity,origin:string,
   devices:DeviceManagementPort):Promise<Response>{
@@ -110,11 +110,11 @@ async function revoke(req:Request,identity:BrowserIdentity,origin:string,
 }
 /** Authenticated browser-only management, never usable in external auth mode. */
 export async function devicesResponse(req:Request,identity:BrowserIdentity,origin:string,
-  devices?:DeviceManagementPort):Promise<Response|null>{
+  devices?:DeviceManagementPort,enrollmentAvailable=true):Promise<Response|null>{
   const path=new URL(req.url).pathname;
   if(path!=="/devices"&&path!=="/devices/revoke")return null;
   if(!devices)return error(503);
-  if(path==="/devices"&&req.method==="GET")return list(req,identity,origin,devices);
+  if(path==="/devices"&&req.method==="GET")return list(req,identity,origin,devices,enrollmentAvailable);
   if(path==="/devices/revoke"&&req.method==="POST")return revoke(req,identity,origin,devices);
   return error(405);
 }
