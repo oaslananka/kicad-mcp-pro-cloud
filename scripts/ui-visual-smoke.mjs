@@ -9,7 +9,7 @@ import {uiCss} from "../dist/ui-styles.js";
 
 // Visual/interaction QA for generated HTML without creating any account,
 // sharing real user data, or granting OAuth. Browser runs locally only.
-const pages={
+const pages=new Map(Object.entries({
   home:renderLanding(true),
   account:renderAccount("Demo Engineer"),
   connections:renderConnectionsPage([{id:"local-demo",name:"ChatGPT",clientId:"test-client",
@@ -18,7 +18,7 @@ const pages={
   consent:renderConsentPage({kind:"approve",clientName:"ChatGPT",
     scopes:["openid","offline_access","projects:read"],query:"test",csrf:"test-csrf"}),
   signIn:renderSignIn("",["github"])
-};
+}));
 // Serve static React-rendered fixture pages over loopback HTTP, as in production.
 // Avoid injecting or constructing HTML inside the browser runtime.
 const server=createServer((req,res)=>{
@@ -28,11 +28,11 @@ const server=createServer((req,res)=>{
     res.end(uiCss);return;
   }
   const kind=path.slice(1);
-  if(!Object.hasOwn(pages,kind)){
+  if(!pages.has(kind)){
     res.writeHead(404);res.end();return;
   }
   res.writeHead(200,{"Content-Type":"text/html; charset=utf-8"});
-  res.end(pages[kind]);
+  res.end(pages.get(kind));
 });
 await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
 const base=`http://127.0.0.1:${server.address().port}`;
@@ -40,7 +40,7 @@ const browser=await chromium.launch({headless:true,...(process.env.CHROME_PATH?{
 try{
   for(const [width,height] of [[1440,900],[768,960],[390,844]]){
     const page=await browser.newPage({viewport:{width,height},deviceScaleFactor:1});
-    for(const kind of Object.keys(pages)){
+    for(const kind of pages.keys()){
       const response=await page.goto(`${base}/${kind}`,{waitUntil:"load"});
       assert.equal(response?.status(),200);
       const metrics=await page.evaluate(()=>({
