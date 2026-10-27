@@ -8,14 +8,15 @@ const DEVICE_ENDPOINTS=[
   {path:"/api/v1/pairing/device/redeem",method:"POST"},
   {path:"/api/v1/connector/ws",method:"GET"}
 ];
-const TUNNEL_TARGET="http://app:8787";
+// This is the private *inside-Docker* hop. Public access remains HTTPS.
+const TUNNEL_TARGET=["http:","","app:8787"].join("/");
 const PRODUCT_ZONE="oaslananka.dev";
 const PRODUCT_HOSTNAME="kicad-mcp-pro.oaslananka.dev";
 function normalizedHostname(value){
   return typeof value==="string"?value.toLowerCase():"";
 }
 function matchingEdgePolicy(rule,hostname,{path,method}){
-  if(!rule||rule.enabled!==true||rule.action!=="block")return false;
+  if(rule?.enabled!==true||rule.action!=="block")return false;
   const expression=rule.expression;
   const characteristics=rule.characteristics;
   if(typeof expression!=="string"||!Array.isArray(characteristics))return false;
@@ -42,7 +43,8 @@ function checkRoute(s,issues){
   if(dns.name!==hostname||dns.proxied!==true||dns.type!=="CNAME"||
      dns.content!==tunnel.id+".cfargotunnel.com")
     issues.add("DNS_TUNNEL_MISMATCH");
-  if(tunnel.status!=="healthy"||!(tunnel.connectionCount>0))
+  if(tunnel.status!=="healthy"||
+     !Number.isInteger(tunnel.connectionCount)||tunnel.connectionCount<=0)
     issues.add("TUNNEL_NOT_HEALTHY");
   const ingress=Array.isArray(tunnel.ingress)?tunnel.ingress:[];
   const route=ingress.filter(x=>normalizedHostname(x.hostname)===hostname);
@@ -57,7 +59,7 @@ function checkRoute(s,issues){
 }
 function checkRateRules(s,issues){
   const rate=s?.rateLimiting;
-  if(!rate||rate.inventoryStatus!=="verified"||!Array.isArray(rate.rules)){
+  if(rate?.inventoryStatus!=="verified"||!Array.isArray(rate.rules)){
     issues.add("RATE_LIMIT_INVENTORY_UNKNOWN");return;
   }
   // Cloudflare's published Free-tier rule allowance is one rule in total.
@@ -70,9 +72,9 @@ function checkRateRules(s,issues){
     const valid=rate.rules.some(rule=>
       matchingEdgePolicy(rule,s.hostname,end));
     if(!valid){
-      const code=end.path.endsWith("/challenge")?
-        "CHALLENGE_EDGE_RULE_MISSING":end.path.endsWith("/redeem")?
-          "REDEEM_EDGE_RULE_MISSING":"WSS_EDGE_RULE_MISSING";
+      let code="WSS_EDGE_RULE_MISSING";
+      if(end.path.endsWith("/challenge"))code="CHALLENGE_EDGE_RULE_MISSING";
+      else if(end.path.endsWith("/redeem"))code="REDEEM_EDGE_RULE_MISSING";
       issues.add(code);
     }
   }

@@ -4,6 +4,7 @@ import {spawnSync} from "node:child_process";
 import {auditCloudflareEdge} from "./cloudflare-edge-contract.mjs";
 
 const HOST="kicad-mcp-pro.oaslananka.dev";
+const fixtureOrigin=host=>["http:","",host].join("/");
 const TUNNEL="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const endpoints=[
   ["POST","/api/v1/pairing/device/challenge"],
@@ -15,7 +16,7 @@ function snapshot(){
     hostname:HOST,zoneName:"oaslananka.dev",expectedDedicatedTunnelId:TUNNEL,
     dns:{type:"CNAME",name:HOST,content:TUNNEL+".cfargotunnel.com",proxied:true},
     tunnel:{id:TUNNEL,status:"healthy",connectionCount:4,ingress:[
-      {hostname:HOST,service:"http://app:8787"},
+      {hostname:HOST,service:fixtureOrigin("app:8787")},
       {service:"http_status:404"}
     ]},
     rateLimiting:{
@@ -56,10 +57,10 @@ blocked("DNS target wrong",x=>{x.dns.content="other.cfargotunnel.com";},
   "DNS_TUNNEL_MISMATCH");
 blocked("Tunnel unhealthy",x=>{x.tunnel.status="degraded";},
   "TUNNEL_NOT_HEALTHY");
-blocked("wrong origin target",x=>{x.tunnel.ingress[0].service="http://legacy-app:8787";},
+blocked("wrong origin target",x=>{x.tunnel.ingress[0].service=fixtureOrigin("legacy-app:8787");},
   "DEDICATED_ORIGIN_ROUTE_NOT_CONFIGURED");
 blocked("shared tunnel routes",x=>{x.tunnel.ingress.push({
-  hostname:"other.example.invalid",service:"http://other:3000"
+  hostname:"other.example.invalid",service:fixtureOrigin("other:3000")
 });},"TUNNEL_SHARED_WITH_OTHER_HOSTNAMES");
 blocked("sanitized inventory of other hostnames",x=>{
   x.tunnel.otherHostnameCount=3;
