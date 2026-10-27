@@ -59,28 +59,35 @@ other device gates are all independently required.
    with no spoof/bypass possibility. This must be tested with two
    independent public client networks and real HTTP/WSS Upgrade
    before considering live route cutover.
-3. **Route specificity:** Confirm only the three KiCad endpoint
+3. **Routing loop:** This candidate currently forwards to its own public
+   hostname. Binding a Worker to that same path without a separately approved
+   origin-bypass design would recurse. **DO NOT DEPLOY** the candidate on
+   production routes as written. Any future rewrite needs a truly independent
+   locked-down origin, verification against direct-public bypass, and genuine
+   WebSocket Upgrade acceptance.
+4. **Route specificity:** Confirm only the three KiCad endpoint
    paths are bound to the Worker, with no route on other applications,
    OAuth callbacks, MCP discovery, static assets, or general KiCad
    routes. Validate that the Worker fetch subrequest reaches the
    dedicated KiCad Tunnel origin without route recursion.
-4. **Dedicated Tunnel:** The new remotely-managed KiCad-only Tunnel
-   (`2cab4780-0ca4-45bf-90f2-dfc3017dee19`) currently has only
-   a fallback 404 and is inactive; it has **no public hostname or
-   connector**. Preserve the old shared Tunnel and its three unrelated
+5. **Dedicated Tunnel:** The existing remotely-managed KiCad-only Tunnel
+   (`2cab4780-0ca4-45bf-90f2-dfc3017dee19`) has an inert one-hostname ingress mapping staged, but is inactive with
+   **no connector** and is not the public DNS target. Preserve the old shared Tunnel and its three unrelated
    routes. Verify isolated private bridge, static TCP peer, and tested
    network/DNS rollback before any cutover.
-5. **Rules preserved:** The existing leaked-credential rule must
+6. **Rules preserved:** The existing leaked-credential rule must
    remain enabled and unchanged. A Worker cannot be counted as a
    replacement for that rule. Existing offline
    `cloudflare-edge-contract.mjs` is based on WAF rules; it deliberately
    **continues to block** this unaccepted Worker alternative until
    authentic live Worker rate-limit/route evidence is independently
    added and reviewed.
-6. **Product readiness:** Production DB is still at 006, device API
-   and WSS flags are OFF; encrypted independently recovered offsite
-   backup and production migrations 007–012, actual Google/GitHub
-   OAuth credentials and complete client interoperability are pending.
+7. **Product readiness:** Production DB is now at schema 012,
+   independent encrypted offsite restores have passed and real GitHub/ChatGPT
+   OAuth reads work. Device API/WSS flags and local KiCad execution remain OFF;
+   client interoperability, source provenance and bounded edge protection
+   are still pending. An owner-only Tailscale/SSH alternative is documented
+   separately and avoids deploying this Worker.
    Do not enable device endpoints as a side effect of testing a Worker.
 
 ## Offline verification only
