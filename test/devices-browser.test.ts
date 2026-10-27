@@ -96,6 +96,25 @@ test("backend errors fail closed, unknown device identity remains indistinguisha
   assert.equal(failure?.status,503);
   assert.doesNotMatch(await failure!.text(),/db disconnected/);
 });
+test("pre-enrollment production schema renders a disabled page without leaking database errors",async()=>{
+  const f=fixture();
+  const pending:DeviceManagementPort={...f.devices,
+    list:async()=>{throw Object.assign(new Error('relation "device_credentials" does not exist'),{code:"42P01"});}
+  };
+  const response=await devicesResponse(new Request(origin+"/devices"),f.identity,origin,pending);
+  assert.equal(response?.status,200);
+  const html=await response!.text();
+  assert.match(html,/not enabled on this deployment/);
+  assert.doesNotMatch(html,/Review device pairing|device_credentials|relation.*does not exist/);
+  assert.doesNotMatch(html,/<form action="\/devices\/revoke"/);
+  const broken:DeviceManagementPort={...f.devices,
+    list:async()=>{throw new Error("database disconnected - sensitive detail");}
+  };
+  const error=await devicesResponse(new Request(origin+"/devices"),f.identity,origin,broken);
+  assert.equal(error?.status,503);
+  assert.doesNotMatch(await error!.text(),/sensitive detail/);
+});
+
 test("no device manager cannot mutate devices",async()=>{
   const f=fixture(),r=await view(f);
   const token=csrf(await r!.text()),cookie=(r!.headers.get("set-cookie")??"").split(";")[0];
