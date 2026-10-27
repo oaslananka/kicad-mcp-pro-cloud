@@ -63,7 +63,7 @@ docker network create --driver bridge "$network" >/dev/null
 docker build --pull=false --build-arg "APP_REVISION=$revision" -t kicad-mcp-pro-cloud:production .
 scripts/doppler-runtime.sh docker compose -f infra/compose.production.yml up -d db
 healthy=false
-for attempt in $(seq 1 30); do
+for _ in $(seq 1 30); do
   status=$(docker inspect kicad-cloud-db-1 --format '{{.State.Health.Status}}')
   if [[ "$status" == healthy ]]; then healthy=true; break; fi
   sleep 2
