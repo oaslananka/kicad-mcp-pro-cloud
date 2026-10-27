@@ -8,12 +8,14 @@ const origin="http://127.0.0.1:8787";
 const secret="test-secret-for-signing-mcp-consent-query";
 const user={id:"user-one",name:"Owner"};
 const calls:{path:string,body:unknown}[]=[];
-async function signed(scopes="openid projects:read",clientId="chatgpt-mcp",expired=false):Promise<string> {
+async function signed(scopes="openid projects:read",clientId="chatgpt-mcp",expired=false,
+  callback?:string):Promise<string> {
   const params=new URLSearchParams({
     client_id:clientId,
     scope:scopes,
     exp:String(Math.floor(Date.now()/1000)+(expired?-300:300))
   });
+  if(callback)params.set("redirect_uri",callback);
   // Signed OAuth fields are canonically sorted by Better Auth.
   params.sort();
   const signature=await makeSignature(params.toString(),secret);
@@ -65,6 +67,23 @@ test("consent displays full signed scope with verified session, client and escap
   assert.match(reply!.headers.get("set-cookie")??"",/SameSite=Strict/);
   assert.equal(calls.filter(c=>c.path.includes("consent")).length,0);
 });
+test("native browser consent allows only the signed client callback and retains strict Origin",async()=>{
+  const callback="https://chatgpt.com/connector_platform_oauth_redirect";
+  const query=await signed("openid profile offline_access projects:read","https://chatgpt.com/oauth/client.json",false,callback);
+  const response=await consentResponse(get(query),identity(),origin);
+  assert.equal(response?.status,200);
+  assert.equal(response?.headers.get("referrer-policy"),"same-origin");
+  const csp=response?.headers.get("content-security-policy")??"";
+  assert.match(csp,/form-action 'self' https:\/\/chatgpt\.com;/);
+  assert.doesNotMatch(csp,/https:\/\/evil\.invalid/);
+  const tampered=query.replace(encodeURIComponent(callback),encodeURIComponent("https://evil.invalid/steal"));
+  assert.equal((await consentResponse(get(tampered),identity(),origin))?.status,403);
+  const other=await signed("openid projects:read","chatgpt-mcp",false,"javascript:alert(1)");
+  const disallowed=await consentResponse(get(other),identity(),origin);
+  assert.equal(disallowed?.status,200);
+  assert.doesNotMatch(disallowed?.headers.get("content-security-policy")??"",/javascript:/);
+});
+
 test("invalid, expired or expanded scope query is rejected before UI",async()=>{
   const original=await signed();
   assert.equal((await consentResponse(get(original.replace("projects%3Aread","projects%3Amanage")),identity(),origin))?.status,403);

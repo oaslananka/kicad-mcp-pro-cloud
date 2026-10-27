@@ -8,12 +8,33 @@ const TTL_MS = 300_000;
 const HEADERS = {
   "Content-Type": "text/html; charset=utf-8",
   "Cache-Control": "no-store",
-  "Referrer-Policy": "no-referrer",
+  // Native Chromium form POSTs send Origin: null under no-referrer;
+  // same-origin keeps the strict Origin + CSRF checks enforceable.
+  "Referrer-Policy": "same-origin",
   "X-Content-Type-Options": "nosniff",
   "Content-Security-Policy": "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'"
 };
+function callbackOrigin(signedQuery:string):string|null {
+  const redirectUris=new URLSearchParams(signedQuery).getAll("redirect_uri");
+  if(redirectUris.length!==1)return null;
+  try{
+    const url=new URL(redirectUris[0]);
+    const loopback=url.protocol==="http:" && ["127.0.0.1","localhost"].includes(url.hostname);
+    if((url.protocol!=="https:" && !loopback) || url.username || url.password || url.hash)return null;
+    return url.origin;
+  }catch{return null;}
+}
 function renderConsentResponse(view:ConsentView, status=200, cookie?:string):Response {
   const headers=new Headers(HEADERS);
+  if(view.kind==="approve"){
+    // Only signed, registered OAuth requests reach this page. A native form
+    // POST may follow Better Auth's validated callback redirect; CSP must
+    // permit that single verified client origin, never arbitrary providers.
+    const callback=callbackOrigin(view.query);
+    if(callback)headers.set("Content-Security-Policy",
+      HEADERS["Content-Security-Policy"].replace("form-action 'self';",
+        `form-action 'self' ${callback};`));
+  }
   if(cookie) headers.append("Set-Cookie",cookie);
   return new Response(renderConsentPage(view),{status,headers});
 }
