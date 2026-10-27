@@ -36,7 +36,11 @@ ledger=$(docker exec kicad-cloud-db-1 psql -U kicad_cloud -d kicad_cloud -At \
 # Destination is always immutable and contains only ciphertext.
 ssh "${ssh_opts[@]}" "$remote" test ! -e "$dir/$filename"
 scp -q "${ssh_opts[@]}" "$src" "$remote:$dir/.partial-$filename"
-remote_hash=$(ssh "${ssh_opts[@]}" "$remote" sha256sum "$dir/.partial-$filename" | awk '{print $1}')
+remote_hash=$(ssh "${ssh_opts[@]}" "$remote" bash -s -- "$dir" "$filename" <<'REMOTE'
+set -euo pipefail
+sha256sum "$1/.partial-$2" | awk '{print $1}'
+REMOTE
+)
 [[ "$remote_hash" == "$sha" ]] || { echo 'Remote encrypted archive checksum mismatch' >&2; exit 1; }
 ssh "${ssh_opts[@]}" "$remote" bash -s -- "$dir" "$filename" <<'REMOTE'
 set -euo pipefail
