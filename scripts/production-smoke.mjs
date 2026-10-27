@@ -8,7 +8,7 @@ assert.equal(landingResponse.status,200,"Premium overview must be public");
 assert.match(landingResponse.headers.get("content-type")??"",/text\/html/);
 assert.match(landingResponse.headers.get("content-security-policy")??"",/style-src 'self'/);
 const page=await landingResponse.text();
-assert.match(page,/Engineering, connected\./);
+assert.match(page,/KiCad MCP Cloud/);
 assert.match(page,/href="\/sign-in"/,
   "Public overview must link to the enabled sign-in route");
 assert.doesNotMatch(page,/<script[\s>]/i);
@@ -18,7 +18,7 @@ assert.doesNotMatch(page,/Account access pending/,
 const stylesheet=await fetch("https://kicad-mcp-pro.oaslananka.dev/assets/ui.css",options);
 assert.equal(stylesheet.status,200);
 assert.match(stylesheet.headers.get("content-type")??"",/text\/css/);
-assert.match(await stylesheet.text(),/\.feature-grid/);
+assert.match(await stylesheet.text(),/\.landing-panel/);
 
 const health=await fetch("https://kicad-mcp-pro.oaslananka.dev/health",options);
 assert.equal(health.status,200);
