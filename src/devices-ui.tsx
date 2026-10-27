@@ -5,7 +5,7 @@ export function renderDevicesPage(devices:ReadonlyArray<ManagedDevice & {csrf:st
     summary:"Device availability and access management for local KiCad integrations.",
     children:<div className="page-stack"><section className="card detail-card">
       {notice?<output className="output-notice">{notice}</output>:null}
-      {!enrollmentAvailable?<div className="status-card"><div>
+      {!enrollmentAvailable && devices.length===0?<div className="status-card"><div>
         <span className="status-pill pending">Not enabled</span>
         <h2>Local KiCad devices aren't available yet</h2>
         <p>Device enrollment and management are not enabled on this deployment. No pairing or local project control is available. The device schema and recovery checks must be approved before activation.</p>
@@ -28,7 +28,7 @@ export function renderDevicesPage(devices:ReadonlyArray<ManagedDevice & {csrf:st
                 </form>}
             </li>)}</ul>}
           <div className="security-note">Revoked keys cannot authenticate, even if a device flag is later changed. No KiCad project files or paths are stored in Cloud.</div>
-          <div className="action-row"><a className="button secondary" href="/devices/pairing">Review device pairing →</a></div>
+          {enrollmentAvailable?<div className="action-row"><a className="button secondary" href="/devices/pairing">Review device pairing →</a></div>:null}
         </>}
     </section></div>
   });
