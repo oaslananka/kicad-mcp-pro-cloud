@@ -192,3 +192,12 @@ or production enrollment is available.
       rate protection. Do not replace unrelated security rules.
 - [ ] Deploy and accept KiCad-only Tunnel, isolated origin, route and
       distributed endpoint rate limits with tested recovery/rollback.
+
+## Database recovery status — 27 Oct 2026
+
+- [x] Fresh authenticated age-encrypted production snapshot.
+- [x] Full restore to isolated PostgreSQL 17 RAM with core metadata
+      and OAuth trigger/ledger verification.
+- [ ] Independently recovered offsite encrypted backup and full restore.
+      Agent-mediated R2 transfer was blocked by tool safety policy.
+- [ ] Controlled production migrations 007–012 after offsite recovery.
