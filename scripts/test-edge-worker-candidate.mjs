@@ -17,7 +17,10 @@ function bindings(){
   const calls=[];
   const env={};
   for(const name of R.flatMap(r=>r.slice(2))){
-    env[name]={limit:async({key})=>{calls.push({name,key});return {success:true}}};
+    Object.defineProperty(env,name,{
+      enumerable:true,configurable:true,writable:true,
+      value:{limit:async({key})=>{calls.push({name,key});return {success:true}}}
+    });
   }
   return {env,calls};
 }
@@ -44,17 +47,20 @@ for(const [method,path,ipKey,globalKey]of R){
     assert.equal(result.status,503);assert.equal(called,0);
   });
   test("rejects denied actor quota "+path,async()=>{
-    const {env}=bindings();env[ipKey]={limit:async()=>({success:false})};
+    const {env}=bindings();
+    Object.defineProperty(env,ipKey,{value:{limit:async()=>({success:false})}});
     const result=await handleCandidate(request(method,path),env,()=>{throw Error("must not forward")});
     assert.equal(result.status,429);
   });
   test("rejects denied global quota "+path,async()=>{
-    const {env}=bindings();env[globalKey]={limit:async()=>({success:false})};
+    const {env}=bindings();
+    Object.defineProperty(env,globalKey,{value:{limit:async()=>({success:false})}});
     const result=await handleCandidate(request(method,path),env,()=>{throw Error("must not forward")});
     assert.equal(result.status,429);
   });
   test("binding failure fails closed "+path,async()=>{
-    const {env}=bindings();env[ipKey]={limit:async()=>{throw Error("unavailable")}};
+    const {env}=bindings();
+    Object.defineProperty(env,ipKey,{value:{limit:async()=>{throw new Error("unavailable")}}});
     const result=await handleCandidate(request(method,path),env,()=>{throw Error("must not forward")});
     assert.equal(result.status,503);
   });

@@ -17,23 +17,32 @@ const PATHS=new Map([
 ]);
 function canonicalIp(input){
   if(typeof input!=="string"||input.length>64||!input||
-    input!==input.trim()||/[,\s%]/.test(input))return null;
-  const isV6=input.includes(":");
-  if(!isV6&&!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(input))return null;
+    input!==input.trim()||input.includes(",")||input.includes("%"))
+    return null;
+  if(!input.includes(":")){
+    const parts=input.split(".");
+    if(parts.length!==4||parts.some(part=>
+      part.length===0||part.length>3||
+      [...part].some(char=>char<"0"||char>"9")||
+      Number(part)>255||String(Number(part))!==part))return null;
+    return input==="0.0.0.0"?null:input;
+  }
   try{
-    const url=new URL(isV6?"https://["+input+"]/":"https://"+input+"/");
-    const host=url.hostname.replace(/^\[|\]$/g,"");
-    if(!isV6&&host!==input)return null;
-    if(isV6&&(!host.includes(":")||!/^[:a-f0-9.]+$/i.test(host)))return null;
-    if(!isV6&&!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host))return null;
-    if(host==="0.0.0.0"||host==="::")return null;
-    // IPv4-mapped addresses must consume the IPv4 actor budget.
-    const match=/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(host);
-    if(match){
-      const a=Number.parseInt(match[1],16),b=Number.parseInt(match[2],16);
-      return [a>>8,a&255,b>>8,b&255].join(".");
+    const host=new URL("https://["+input+"]/").hostname;
+    if(!host.startsWith("[")||!host.endsWith("]"))return null;
+    const ip=host.slice(1,-1);
+    if(!ip.includes(":")||ip==="::"||
+       [...ip].some(char=>!"0123456789abcdef:.".includes(char)))return null;
+    if(ip.startsWith("::ffff:")){
+      const components=ip.slice(7).split(":");
+      if(components.length===2&&components.every(value=>value.length>=1&&value.length<=4&&
+        [...value].every(char=>"0123456789abcdef".includes(char)))){
+        const hi=Number.parseInt(components[0],16);
+        const lo=Number.parseInt(components[1],16);
+        return [hi>>8,hi&255,lo>>8,lo&255].join(".");
+      }
     }
-    return host;
+    return ip;
   }catch{return null;}
 }
 function deny(status){
@@ -76,8 +85,26 @@ export async function handleCandidate(request,env,forward){
   // this requires network acceptance before a route can be enabled.
   return forward(request);
 }
+// Only hardcoded, approved destination URLs ever reach fetch(). A client
+// cannot select another scheme/host/port/path through its request URL.
+async function forwardKnownRoute(request){
+  const path=new URL(request.url).pathname;
+  switch(path){
+    case "/api/v1/pairing/device/challenge":
+      return fetch(new Request(
+        "https://kicad-mcp-pro.oaslananka.dev/api/v1/pairing/device/challenge",request));
+    case "/api/v1/pairing/device/redeem":
+      return fetch(new Request(
+        "https://kicad-mcp-pro.oaslananka.dev/api/v1/pairing/device/redeem",request));
+    case "/api/v1/connector/ws":
+      return fetch(new Request(
+        "https://kicad-mcp-pro.oaslananka.dev/api/v1/connector/ws",request));
+    default:
+      return deny(404);
+  }
+}
 export default {
   async fetch(request,env){
-    return handleCandidate(request,env,r=>fetch(r));
+    return handleCandidate(request,env,forwardKnownRoute);
   }
 };
