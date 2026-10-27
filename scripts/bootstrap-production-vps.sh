@@ -8,8 +8,10 @@ mode=${1:-preflight}
   echo 'Usage: bootstrap-production-vps.sh [preflight|install|preflight-pr PR_NUMBER HEAD_SHA|install-pr PR_NUMBER HEAD_SHA]' >&2; exit 2
 }
 acceptance=false
+pr_number=''
 if [[ "$mode" == preflight-pr || "$mode" == install-pr ]]; then
   acceptance=true
+  pr_number=$2
   [[ $# == 3 && "$2" =~ ^[1-9][0-9]{0,8}$ && "$3" =~ ^[a-f0-9]{40}$ ]] || {
     echo 'Acceptance requires explicit PR number and exact 40-character head SHA' >&2; exit 2
   }
@@ -96,11 +98,52 @@ process.stdin.on("end",()=>{
   exit 1
 fi
 fi
+# CI and review were checked before configuration access. The source can
+# nevertheless change while the first image builds. Refuse a superseded PR,
+# a closed PR, or an advanced main before any database is created/migrated.
+assert_reviewed_source_still_current() {
+  [[ "$(git rev-parse HEAD)" == "$revision" &&
+     -z "$(git status --porcelain)" ]] || {
+    echo 'Reviewed checkout changed during initial installation; abort' >&2; return 1
+  }
+  local latest_main
+  latest_main=$(git ls-remote origin refs/heads/main | awk '{print $1}')
+  [[ "$latest_main" == "$remote_main" ]] || {
+    echo 'Remote main advanced during installation; abort before database start' >&2; return 1
+  }
+  if [[ "$acceptance" == true ]]; then
+    local latest_pr latest_payload
+    latest_pr=$(git ls-remote origin "refs/pull/$pr_number/head" | awk '{print $1}')
+    [[ "$latest_pr" == "$revision" ]] || {
+      echo 'Reviewed PR head changed during installation; abort before database start' >&2; return 1
+    }
+    latest_payload=$(curl --fail --silent --show-error --max-time 15       --header 'Accept: application/vnd.github+json'       "https://api.github.com/repos/oaslananka/kicad-mcp-pro-cloud/pulls/$pr_number")
+    if ! printf '%s' "$latest_payload" | node -e '
+      let input="";process.stdin.on("data",b=>input+=b);
+      process.stdin.on("end",()=>{
+        try{
+          const p=JSON.parse(input),sha=process.argv[1],main=process.argv[2],
+            num=Number(process.argv[3]),repo="oaslananka/kicad-mcp-pro-cloud";
+          if(p.number!==num||p.state!=="open"||p.head?.sha!==sha||
+             p.base?.sha!==main||p.base?.ref!=="main"||
+             p.head?.repo?.full_name!==repo||p.base?.repo?.full_name!==repo)
+            process.exitCode=1;
+        }catch{process.exitCode=1;}
+      });' "$revision" "$remote_main" "$pr_number"; then
+      echo 'Reviewed PR closed or changed during installation; abort before database start' >&2
+      return 1
+    fi
+  fi
+}
 # Acceptance installations never enable a timer and cannot be automatically
 # deployed from main while the PR is still open.
 # Does not configure DNS, provider OAuth, any other account or existing VPS.
-docker network create --driver bridge "$network" >/dev/null
+assert_reviewed_source_still_current
+# Build before allocating the dedicated ingress network. If PR/main changes
+# while building, stop without leaving a half-provisioned network or database.
 docker build --pull=false --build-arg "APP_REVISION=$revision" -t kicad-mcp-pro-cloud:production .
+assert_reviewed_source_still_current
+docker network create --driver bridge "$network" >/dev/null
 scripts/doppler-runtime.sh docker compose -f infra/compose.production.yml up -d db
 healthy=false
 for _ in $(seq 1 30); do

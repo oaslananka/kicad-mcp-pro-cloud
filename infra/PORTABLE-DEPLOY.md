@@ -133,7 +133,12 @@ already deployed production VPS. No `main` merge, production GitHub
 secret modification, live release timer installation, provider account
 write or paid-resource provisioning is part of this PR acceptance mode.
 The PR trial must use a **separate HTTPS hostname** and its own Doppler
-config and OAuth provider registration. The installation only verifies that
+config and OAuth provider registration. During installation, the verified PR head, PR open state, unchanged main and
+clean local worktree are checked again before creating resources and after the
+OCI image build; if anything changes mid-build, it aborts before allocating
+the ingress network or touching the database. A candidate image may remain
+after this refusal; review it rather than blindly retrying.
+The installation only verifies that
 the login form and OAuth discovery are available; the operator must also
 complete a real, owner-controlled OAuth round trip and check the approved
 callback URL separately before final acceptance. Accept actual backup,

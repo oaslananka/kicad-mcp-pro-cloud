@@ -18,11 +18,24 @@ cat > "$bin/git" <<'MOCK'
 set -eu
 case "$*" in
   'remote get-url origin') echo 'https://github.com/oaslananka/kicad-mcp-pro-cloud.git';;
-  'status --porcelain') ;;
+  'status --porcelain')
+    if [[ "${MOCK_DIRTY_AFTER_BUILD:-}" == yes ]] && grep -q '^docker build ' "$MOCK_LOG"; then
+      echo ' M scripts/bootstrap-production-vps.sh'
+    fi;;
   'rev-parse HEAD') echo "$MOCK_HEAD";;
   'rev-parse refs/remotes/origin/main') echo "$MOCK_BASE";;
-  'ls-remote origin refs/pull/63/head') echo "$MOCK_HEAD refs/pull/63/head";;
-  'ls-remote origin refs/heads/main') printf '%s\n' "$MOCK_BASE refs/heads/main";;
+  'ls-remote origin refs/pull/63/head')
+    if [[ "${MOCK_ADVANCE_AFTER_BUILD:-}" == pr ]] && grep -q '^docker build ' "$MOCK_LOG"; then
+      printf '%s refs/pull/63/head\n' 'ffffffffffffffffffffffffffffffffffffffff'
+    else
+      echo "$MOCK_HEAD refs/pull/63/head"
+    fi;;
+  'ls-remote origin refs/heads/main')
+    if [[ "${MOCK_ADVANCE_AFTER_BUILD:-}" == main ]] && grep -q '^docker build ' "$MOCK_LOG"; then
+      printf '%s refs/heads/main\n' 'ffffffffffffffffffffffffffffffffffffffff'
+    else
+      printf '%s\n' "$MOCK_BASE refs/heads/main"
+    fi;;
   *) exit 98;;
 esac
 MOCK
@@ -64,7 +77,11 @@ if [[ "$*" == *'actions/workflows/ci.yml/runs'* ]]; then
     printf '{"workflow_runs":[]}'
   fi
 elif [[ "$*" == *'/pulls/63'* ]]; then
-  printf '{"number":63,"state":"open","head":{"sha":"%s","repo":{"full_name":"oaslananka/kicad-mcp-pro-cloud"}},"base":{"sha":"%s","ref":"main","repo":{"full_name":"oaslananka/kicad-mcp-pro-cloud"}}}' "$MOCK_HEAD" "$MOCK_BASE"
+  state=open
+  if [[ "${MOCK_CLOSE_AFTER_BUILD:-}" == yes ]] && grep -q '^docker build ' "$MOCK_LOG"; then
+    state=closed
+  fi
+  printf '{"number":63,"state":"%s","head":{"sha":"%s","repo":{"full_name":"oaslananka/kicad-mcp-pro-cloud"}},"base":{"sha":"%s","ref":"main","repo":{"full_name":"oaslananka/kicad-mcp-pro-cloud"}}}' "$state" "$MOCK_HEAD" "$MOCK_BASE"
 elif [[ "$*" == *'/check-runs?per_page=100'* ]]; then
   if [[ "$MOCK_CI_PASS" == yes ]]; then
     printf '{"check_runs":['
@@ -177,3 +194,31 @@ output=$(MOCK_EXISTING='' MOCK_CI_PASS=yes bash scripts/bootstrap-production-vps
 [[ "$output" == *'Release timer NOT enabled'* ]]
 grep -q 'migrations-cli.js --apply' "$log"
 echo 'PASS: isolated PR acceptance install requires security proof and leaves watcher OFF'
+
+
+# CI/Security passing initially is not enough: the PR and main must still
+# match after the OCI build and BEFORE database writes.
+for scenario in pr main closed dirty; do
+  : > "$log"
+  export MOCK_ADVANCE_AFTER_BUILD='' MOCK_CLOSE_AFTER_BUILD='' MOCK_DIRTY_AFTER_BUILD=''
+  case "$scenario" in
+    pr|main) export MOCK_ADVANCE_AFTER_BUILD="$scenario";;
+    closed) export MOCK_CLOSE_AFTER_BUILD=yes;;
+    dirty) export MOCK_DIRTY_AFTER_BUILD=yes;;
+  esac
+  if out=$(MOCK_EXISTING='' MOCK_CI_PASS=yes bash scripts/bootstrap-production-vps.sh install-pr 63 "$MOCK_HEAD" 2>&1); then
+    echo "FAIL: install accepted changed $scenario after build" >&2; exit 1
+  fi
+  case "$scenario" in
+    pr) [[ "$out" == *'Reviewed PR head changed during installation'* ]];;
+    main) [[ "$out" == *'Remote main advanced during installation'* ]];;
+    closed) [[ "$out" == *'Reviewed PR closed or changed during installation'* ]];;
+    dirty) [[ "$out" == *'Reviewed checkout changed during initial installation'* ]];;
+  esac || { echo "FAIL: wrong rejection for $scenario: $out" >&2; exit 1; }
+  grep -q '^docker build ' "$log"
+  if grep -Eq 'docker (network create|compose.*up -d db)|migrations-cli.js --apply' "$log"; then
+    echo "FAIL: $scenario change allocated an ingress network or started a database" >&2; exit 1
+  fi
+  echo "PASS: $scenario changed after build -> no database started"
+done
+unset MOCK_ADVANCE_AFTER_BUILD MOCK_CLOSE_AFTER_BUILD MOCK_DIRTY_AFTER_BUILD
