@@ -78,3 +78,14 @@ See docs/PRODUCTION-DATABASE-RECOVERY-ACCEPTANCE.md.
 This is NOT offsite disaster recovery. Migrations 007–012 remain blocked
 until an independently downloaded remote encrypted archive passes
 another full restore. Never treat a same-host backup as offsite.
+
+
+## Schema 007-012 production-snapshot rehearsal
+
+The optional --rehearse-schema switch on
+scripts/production-restore-drill.sh invokes the real Cloud migration
+engine against an isolated RAM-backed database cloned from the latest
+encrypted production snapshot. On 27 October 2026 it passed migration
+006 to 012 with preserved metadata and idempotent replay, while
+production remained on 006. Offsite full restore is still required
+before live migration.
