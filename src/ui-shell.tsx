@@ -59,15 +59,18 @@ export function Notice({message}:{readonly message:string}){
   return <section className="card detail-card"><div className="notice-icon">!</div><p>{message}</p>
     <a href="/" className="text-link">Return to overview ↗</a></section>;
 }
-export function SignIn({query}:{readonly query:string}){
+export function SignIn({query,providers}:{
+  readonly query:string;
+  readonly providers:ReadonlyArray<"google"|"github">
+}){
   return <section className="card auth-card">
     <div className="panel-heading"><span className="panel-icon" aria-hidden="true">✳</span>
       <div><h2>Welcome to your workspace</h2><p>Choose a trusted identity provider to continue.</p></div></div>
-    <div className="providers"><form action="/auth/start/google" method="post">
+    <div className="providers">{providers.includes("google")&&<form action="/auth/start/google" method="post">
       <input type="hidden" name="oauth_query" value={query}/><button className="button provider" type="submit"><span className="provider-logo">G</span> Continue with Google <span className="arrow" aria-hidden="true">↗</span></button>
-    </form><form action="/auth/start/github" method="post">
+    </form>}{providers.includes("github")&&<form action="/auth/start/github" method="post">
       <input type="hidden" name="oauth_query" value={query}/><button className="button provider" type="submit"><span className="provider-logo github">GH</span> Continue with GitHub <span className="arrow" aria-hidden="true">↗</span></button>
-    </form></div>
+    </form>}</div>
     <div className="security-note"><span aria-hidden="true">◇</span> Sign-in never automatically shares your KiCad designs. Project access is authorized separately.</div>
   </section>;
 }

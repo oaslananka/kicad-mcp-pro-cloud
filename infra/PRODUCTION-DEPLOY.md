@@ -13,8 +13,12 @@ Required variables: KICAD_DB_PASSWORD, PUBLIC_ORIGIN,
 OAUTH_ISSUER, OAUTH_JWKS_URL and OAUTH_AUDIENCE. DATABASE_URL contains no credentials; pg uses PGPASSWORD from the Doppler password.
 GitHub Secrets must contain only DOPPLER_TOKEN.
 
-This release explicitly fixes AUTH_MODE=external. Actual Google/GitHub login
-and ChatGPT/Claude OAuth callbacks have not yet completed acceptance. A
+Production defaults to AUTH_MODE=external. After registering and securely
+storing a real GitHub OAuth Web app in the existing Doppler config,
+AUTH_MODE=builtin may be explicitly set for first-login acceptance.
+Google credentials are optional until the second provider is registered;
+a partial provider pair aborts startup. Real GitHub sign-in and
+ChatGPT/Claude OAuth callbacks have not yet completed acceptance. A
 working premium page or /health does not imply that the device connector
 or remote KiCad execution is operational.
 

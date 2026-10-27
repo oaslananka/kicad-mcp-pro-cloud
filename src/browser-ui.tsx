@@ -4,9 +4,11 @@ export function renderLanding(identityEnabled:boolean){
     summary:"A secure AI bridge for KiCad workflows — transparent permissions, local project ownership, and a modern connected experience.",
     children:<Landing identityEnabled={identityEnabled}/>});
 }
-export function renderSignIn(query:string){
+export function renderSignIn(
+  query:string,providers:ReadonlyArray<"google"|"github">=["google","github"]
+){
   return renderPage({title:"Make the connection.",kind:"sign-in",eyebrow:"AUTHORIZED ACCESS",
-    summary:"A seamless sign-in for a controlled, local-first engineering workflow.",children:<SignIn query={query}/>});
+    summary:"A seamless sign-in for a controlled, local-first engineering workflow.",children:<SignIn query={query} providers={providers}/>});
 }
 export function renderAccount(name:string){
   return renderPage({title:"Your workspace.",kind:"account",eyebrow:"ACCOUNT OVERVIEW",

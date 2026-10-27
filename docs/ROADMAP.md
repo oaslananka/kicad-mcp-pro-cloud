@@ -217,3 +217,10 @@ or production enrollment is available.
       authenticity, WebSocket Upgrade, no request recursion and route
       scoping before extending the edge readiness contract or enabling
       any public endpoint.
+
+## First working login: GitHub alone is sufficient
+
+- [x] Accept one complete social OAuth provider and hide disabled routes.
+- [ ] Register real GitHub OAuth client, save Doppler credentials, and
+      activate built-in identity with live user consent tests.
+- [ ] Google can be enabled later; not an MVP prerequisite.

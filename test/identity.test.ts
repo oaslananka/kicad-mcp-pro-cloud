@@ -27,6 +27,27 @@ test("identity rejects missing social credentials and key", () => {
   }, {secret:"",googleId:"",googleSecret:"",githubId:"",githubSecret:""}));
 });
 
+test("one complete OAuth provider permits first login, but partial provider fails closed",()=>{
+  const config={
+    publicOrigin:"http://127.0.0.1:8787",
+    audience:"http://127.0.0.1:8787/mcp",
+    databaseUrl:"postgresql://127.0.0.1:65432/unused"
+  };
+  const secret=randomBytes(48).toString("hex");
+  const onlyGithub={secret,googleId:"",googleSecret:"",
+    githubId:"fixture-github",githubSecret:"fixture-github-secret"};
+  const id=createIdentity(config,onlyGithub);
+  assert.equal(Boolean(id.options.socialProviders?.github),true);
+  assert.equal(Boolean(id.options.socialProviders?.google),false);
+  const onlyGoogle=createIdentity(config,{secret,googleId:"fixture-google",
+    googleSecret:"fixture-google-secret",githubId:"",githubSecret:""});
+  assert.equal(Boolean(onlyGoogle.options.socialProviders?.google),true);
+  assert.equal(Boolean(onlyGoogle.options.socialProviders?.github),false);
+  assert.throws(()=>createIdentity(config,{...onlyGithub,googleId:"partial-id"}));
+  assert.throws(()=>createIdentity(config,{...onlyGithub,githubSecret:""}));
+  assert.throws(()=>createIdentity(config,{...onlyGithub,githubId:"",githubSecret:""}));
+});
+
 test("Better Auth serves MCP-aware OAuth metadata with PostgreSQL", {skip: !databaseUrl}, async () => {
   const pool = new pg.Pool({connectionString:databaseUrl});
   try {

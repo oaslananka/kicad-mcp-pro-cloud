@@ -19,6 +19,26 @@ const config=JSON.parse(json);
 assert.deepEqual(Object.keys(config.services).sort((a,b)=>a.localeCompare(b)),["app","db"]);
 assert.equal(config.services.app.image,"kicad-mcp-pro-cloud:production");
 assert.equal(config.services.app.environment.AUTH_MODE,"external");
+assert.equal(config.services.app.environment.GITHUB_CLIENT_ID,"");
+assert.equal(config.services.app.environment.GITHUB_CLIENT_SECRET,"");
+assert.equal(config.services.app.environment.GOOGLE_CLIENT_ID,"");
+assert.equal(config.services.app.environment.GOOGLE_CLIENT_SECRET,"");
+const githubOnlyEnv={
+  ...env,
+  AUTH_MODE:"builtin",
+  BETTER_AUTH_SECRET:randomBytes(48).toString("hex"),
+  GITHUB_CLIENT_ID:"fixture-github-client",
+  GITHUB_CLIENT_SECRET:randomBytes(32).toString("hex")
+};
+const configured=JSON.parse(execFileSync("/usr/bin/docker",
+  ["compose","-f","infra/compose.production.yml","config","--format","json"],
+  {env:githubOnlyEnv,encoding:"utf8"}));
+assert.equal(configured.services.app.environment.AUTH_MODE,"builtin");
+assert.equal(configured.services.app.environment.GITHUB_CLIENT_ID,githubOnlyEnv.GITHUB_CLIENT_ID);
+assert.equal(configured.services.app.environment.GITHUB_CLIENT_SECRET,githubOnlyEnv.GITHUB_CLIENT_SECRET);
+assert.equal(configured.services.app.environment.GOOGLE_CLIENT_ID,"");
+assert.equal(configured.services.app.environment.GOOGLE_CLIENT_SECRET,"");
+assert.equal(configured.services.app.environment.BETTER_AUTH_SECRET,githubOnlyEnv.BETTER_AUTH_SECRET);
 assert.equal(config.services.app.environment.PGPASSWORD,fixturePassword);
 assert.equal(config.services.app.environment.DATABASE_URL,"postgresql://kicad_cloud@db:5432/kicad_cloud");
 assert.equal(config.services.db.environment.POSTGRES_PASSWORD,fixturePassword);

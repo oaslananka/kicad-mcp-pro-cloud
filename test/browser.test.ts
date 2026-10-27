@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { browserResponse, type BrowserIdentity } from "../src/browser.js";
+import {createIdentity} from "../src/identity.js";
+import {randomBytes} from "node:crypto";
 
 const origin="http://127.0.0.1:8787";
 function mock(url="https://github.com/login/oauth/authorize"):BrowserIdentity {
@@ -22,6 +24,27 @@ test("first-party sign-in is available only with builtin identity",async()=>{
   assert.match(await page!.text(),/Continue with Google/);
   const invalid=await browserResponse(new Request(origin+"/sign-in?client_id=attacker"),mock(),origin);
   assert.equal(invalid?.status,400);
+});
+
+test("GitHub-only identity hides and denies unconfigured Google login",async()=>{
+  const identity=createIdentity({
+    publicOrigin:origin,audience:origin+"/mcp",
+    databaseUrl:"postgresql://127.0.0.1:65432/unused"
+  },{
+    secret:randomBytes(48).toString("hex"),
+    googleId:"",googleSecret:"",
+    githubId:"fixture-github-id",githubSecret:"fixture-github-secret"
+  });
+  const page=await browserResponse(new Request(origin+"/sign-in"),identity,origin);
+  const text=await page!.text();
+  assert.match(text,/Continue with GitHub/);
+  assert.doesNotMatch(text,/Continue with Google/);
+  const disallowed=await browserResponse(new Request(origin+"/auth/start/google",{
+    method:"POST",
+    headers:{Origin:origin,"Content-Type":"application/x-www-form-urlencoded"},
+    body:"oauth_query="
+  }),identity,origin);
+  assert.equal(disallowed?.status,404);
 });
 
 test("sign-in denies CSRF, tampered query, and extra fields",async()=>{
