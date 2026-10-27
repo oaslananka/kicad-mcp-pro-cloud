@@ -69,6 +69,7 @@ healthy=false
 for attempt in $(seq 1 25); do
   status=$(docker inspect kicad-cloud-app-1 --format '{{.State.Health.Status}}')
   if [[ "$status" == healthy ]]; then healthy=true; break; fi
+  echo "Waiting for app health ($attempt/25): $status"
   sleep 3
 done
 if [[ "$healthy" != true ]] || ! EXPECTED_REVISION="$target" node scripts/production-smoke.mjs; then
