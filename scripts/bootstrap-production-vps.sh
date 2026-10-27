@@ -77,7 +77,7 @@ scripts/doppler-runtime.sh docker compose -f infra/compose.cloudflare.yml up -d 
 # Cloudflare Tunnel, DNS and TLS may need a short time to become usable.
 # Bounded readiness never masks a wrong domain, route or revision.
 public_ready=false
-for attempt in $(seq 1 20); do
+for _ in $(seq 1 20); do
   observed=$(curl --fail --silent --show-error --max-time 7 \
     "$public_origin/health" 2>/dev/null | \
     node -e 'let b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{try{const h=JSON.parse(b);if(h.status==="ok")process.stdout.write(h.revision??"")}catch{}})' || true)

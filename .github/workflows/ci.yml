@@ -43,6 +43,7 @@ jobs:
           bash -n scripts/doppler-runtime.sh
           bash -n scripts/setup-vps-doppler.sh
           bash -n scripts/bootstrap-production-vps.sh
+          bash -n scripts/test-portable-bootstrap.sh
           node --check scripts/portable-config.mjs
           bash -n scripts/install-production-deploy-timer.sh
           node --check scripts/production-browser-smoke.mjs
@@ -54,7 +55,9 @@ jobs:
       - name: Validate production Compose topology and healthcheck
         run: node scripts/check-production-compose.mjs
       - name: Verify portable Doppler deployment contracts (offline fixtures)
-        run: node --test scripts/test-portable-deployment.mjs
+        run: |
+          node --test scripts/test-portable-deployment.mjs
+          bash scripts/test-portable-bootstrap.sh
       - name: Verify isolated ingress candidate only (offline, synthetic secrets)
         run: |
           node scripts/check-ingress-candidate.mjs
