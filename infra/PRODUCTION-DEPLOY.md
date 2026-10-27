@@ -14,7 +14,9 @@ no external runner, public deployment port or SSH permission from Actions.
 3. On the existing VPS, a `systemd --user` timer checks current `main` every
    two minutes. Only when it differs from the running revision, it fetches
    public CI run metadata and requires a successful **push/main** `CI` for
-   that exact SHA. It builds and deploys that commit, without a secret on
+   that exact SHA (or a successful manually dispatched `CI` on the same current
+   main revision if a merge failed to emit a push CI event). It builds and deploys
+   that commit, without a secret on
    GitHub Actions or an inbound deploy webhook.
 4. The VPS deployer saves the previous application image as the one rollback,
    recreates **only** the app, checks Docker health and the production smoke
@@ -23,6 +25,18 @@ no external runner, public deployment port or SSH permission from Actions.
    runs a separate public smoke and **real Chromium form POST** (must redirect
    to `github.com`, with no user authorization performed). Deployment is green
    only when live acceptance passes. Failure remains visible in Actions.
+
+### Controlled CI recovery (only when a verified main merge has no push CI)
+
+From an authorized maintainer's GitHub CLI, run:
+
+    gh workflow run ci.yml -R oaslananka/kicad-mcp-pro-cloud --ref main
+
+This executes the **same full test suite** on the current main SHA. The
+production workflow and VPS timer accept the result only if the CI run is
+successful, its event is `workflow_dispatch`, its branch is `main`, and its
+commit SHA is still the latest main. PR runs, failed tests and superseded
+revisions never qualify. No additional secret, SSH port or bypass is needed.
 
 The source of truth for the running revision is `GET /health` → `revision`.
 The `APP_REVISION` build argument contains only a public Git commit SHA.

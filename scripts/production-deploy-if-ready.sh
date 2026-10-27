@@ -21,9 +21,11 @@ current=$(curl --fail --silent --show-error --max-time 10 \
 [[ "$current" == "$target" ]] && { echo "Already deployed $target"; exit 0; }
 
 # Public metadata API, called only when main differs; cannot deploy PR runs.
+# A manually dispatched exact-main CI is also accepted after full success;
+# this is a recovery trigger, never an alternative to verification.
 ci=$(curl --fail --silent --show-error --max-time 15 \
   --header 'Accept: application/vnd.github+json' \
-  'https://api.github.com/repos/oaslananka/kicad-mcp-pro-cloud/actions/workflows/ci.yml/runs?branch=main&event=push&per_page=10')
+  'https://api.github.com/repos/oaslananka/kicad-mcp-pro-cloud/actions/workflows/ci.yml/runs?branch=main&per_page=30')
 verified=$(python3 -c '
 import json,sys
 sha=sys.argv[1]
@@ -31,7 +33,9 @@ try:
  runs=json.load(sys.stdin)["workflow_runs"]
 except (KeyError,ValueError):
  sys.exit(2)
-found=[r for r in runs if r.get("head_sha")==sha and r.get("event")=="push"]
+found=[r for r in runs if r.get("head_sha")==sha and
+       r.get("event") in ("push","workflow_dispatch") and
+       r.get("head_branch")=="main"]
 print("yes" if any(r.get("status")=="completed" and r.get("conclusion")=="success" for r in found) else "no")
 ' "$target" <<< "$ci")
 [[ "$verified" == yes ]] || { echo "Current main $target has no successful CI yet; not deploying"; exit 0; }

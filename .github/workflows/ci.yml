@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Controlled recovery when a merge provider produces no push CI event.
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
