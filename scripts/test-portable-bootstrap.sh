@@ -19,8 +19,10 @@ set -eu
 case "$*" in
   'remote get-url origin') echo 'https://github.com/oaslananka/kicad-mcp-pro-cloud.git';;
   'status --porcelain') ;;
-  'rev-parse HEAD'|'rev-parse refs/remotes/origin/main') echo "$MOCK_HEAD";;
-  'ls-remote origin refs/heads/main') printf '%s\n' "$MOCK_HEAD refs/heads/main";;
+  'rev-parse HEAD') echo "$MOCK_HEAD";;
+  'rev-parse refs/remotes/origin/main') echo "$MOCK_BASE";;
+  'ls-remote origin refs/pull/63/head') echo "$MOCK_HEAD refs/pull/63/head";;
+  'ls-remote origin refs/heads/main') printf '%s\n' "$MOCK_BASE refs/heads/main";;
   *) exit 98;;
 esac
 MOCK
@@ -53,9 +55,28 @@ set -eu
 printf 'curl %s\n' "$*" >> "$MOCK_LOG"
 if [[ "$*" == *'actions/workflows/ci.yml/runs'* ]]; then
   if [[ "$MOCK_CI_PASS" == yes ]]; then
-    printf '{"workflow_runs":[{"head_sha":"%s","event":"push","status":"completed","conclusion":"success"}]}' "$MOCK_HEAD"
+    if [[ "$*" == *'event=pull_request'* ]]; then
+      printf '{"workflow_runs":[{"head_sha":"%s","event":"pull_request","status":"completed","conclusion":"success"}]}' "$MOCK_HEAD"
+    else
+      printf '{"workflow_runs":[{"head_sha":"%s","event":"push","status":"completed","conclusion":"success"}]}' "$MOCK_HEAD"
+    fi
   else
     printf '{"workflow_runs":[]}'
+  fi
+elif [[ "$*" == *'/pulls/63'* ]]; then
+  printf '{"number":63,"state":"open","head":{"sha":"%s","repo":{"full_name":"oaslananka/kicad-mcp-pro-cloud"}},"base":{"sha":"%s","ref":"main","repo":{"full_name":"oaslananka/kicad-mcp-pro-cloud"}}}' "$MOCK_HEAD" "$MOCK_BASE"
+elif [[ "$*" == *'/check-runs?per_page=100'* ]]; then
+  if [[ "$MOCK_CI_PASS" == yes ]]; then
+    printf '{"check_runs":['
+    id=1
+    for name in 'check' 'SonarCloud Code Analysis' 'Codacy Static Code Analysis' 'CodeQL' 'semgrep-cloud-platform/scan' 'GitGuardian Security Checks' 'Socket Security: Pull Request Alerts' 'Analyze (javascript-typescript)' 'Analyze (actions)'; do
+      [[ $id == 1 ]] || printf ','
+      printf '{"id":%s,"name":"%s","status":"completed","conclusion":"success"}' "$id" "$name"
+      id=$((id+1))
+    done
+    printf ']}'
+  else
+    printf '{"check_runs":[]}'
   fi
 elif [[ "$*" == *'/health'* ]]; then
   printf '{"status":"ok","revision":"%s"}' "$MOCK_HEAD"
@@ -71,7 +92,7 @@ fi
 exec "$REAL_NODE" "$@"
 MOCK
 chmod 700 "$bin"/*
-export MOCK_HEAD="$mock_head" REAL_NODE="$real_node" MOCK_LOG="$log"
+export MOCK_HEAD="$mock_head" MOCK_BASE="$mock_head" REAL_NODE="$real_node" MOCK_LOG="$log"
 export PUBLIC_ORIGIN='https://pcb.example.test'
 export OAUTH_ISSUER="$PUBLIC_ORIGIN/api/auth"
 export OAUTH_JWKS_URL="$PUBLIC_ORIGIN/api/auth/jwks"
@@ -132,3 +153,27 @@ if grep -Eq 'systemctl|kicad-cloud-production.timer' "$log"; then
   exit 1
 fi
 echo 'PASS: fresh install provisions in isolation without enabling another release watcher'
+# A detached, owner-reviewed PR checkout is allowed ONLY in the two explicitly
+# named -pr modes; never in ordinary first-install modes.
+export MOCK_HEAD='b189aeaadef23f226e6438d00655922484c46143'
+export MOCK_BASE='1697bf37f689aac3f16eca2dc0b5827f055e9795'
+: > "$log"
+if output=$(MOCK_EXISTING='' MOCK_CI_PASS=yes bash scripts/bootstrap-production-vps.sh preflight 2>&1); then
+  echo 'FAIL: ordinary production preflight accepted a PR checkout' >&2; exit 1
+fi
+[[ "$output" == *'locally verified current origin/main'* ]]
+if output=$(MOCK_EXISTING='' MOCK_CI_PASS=no bash scripts/bootstrap-production-vps.sh preflight-pr 63 "$MOCK_HEAD" 2>&1); then
+  echo 'FAIL: acceptance preflight accepted missing PR CI' >&2; exit 1
+fi
+[[ "$output" == *'acceptance blocked'* ]]
+assert_no_mutation
+output=$(MOCK_EXISTING='' MOCK_CI_PASS=yes bash scripts/bootstrap-production-vps.sh preflight-pr 63 "$MOCK_HEAD")
+[[ "$output" == *'New VPS preflight passed'* ]]
+assert_no_mutation
+echo 'PASS: only reviewed, exact-head PR with all green scans can preflight'
+: > "$log"
+output=$(MOCK_EXISTING='' MOCK_CI_PASS=yes bash scripts/bootstrap-production-vps.sh install-pr 63 "$MOCK_HEAD")
+[[ "$output" == *'PR #63'*"$MOCK_HEAD"* ]]
+[[ "$output" == *'Release timer NOT enabled'* ]]
+grep -q 'migrations-cli.js --apply' "$log"
+echo 'PASS: isolated PR acceptance install requires security proof and leaves watcher OFF'

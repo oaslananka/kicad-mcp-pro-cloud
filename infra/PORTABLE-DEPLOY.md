@@ -90,9 +90,63 @@ public hostname.
    in command arguments, shell history or plaintext files. Set the **nonsecret
    bootstrap selector** `KICAD_DOPPLER_SCOPED=true` in the installer shell.
 
+## Independent, unmerged PR acceptance (before any production release)
+
+**The acceptance order matters:** merging this PR into `main` before the
+independent VPS trial would trigger the existing production watcher. To test
+the PR code *before merging*, the installer has two explicit,
+non-production-watcher modes: `preflight-pr` and `install-pr`. They require
+an **exact full commit SHA** and a real, same-repository GitHub PR number, and
+fail closed unless the checked-out SHA equals the advertised GitHub PR ref,
+the PR still targets the current `main`, the real PR GitHub Actions CI run
+has succeeded for that SHA, and the current CodeQL, Semgrep, SonarCloud,
+Codacy, GitGuardian and other expected check runs have all completed
+successfully. Pending/neutral/failing/missing gates, forks, stale checkouts,
+closed PRs or changed `main` abort before secret access and Docker changes.
+
+On a **separate, owner-authorized, empty VPS** with independently registered
+HTTPS hostname, dedicated Tunnel and Doppler config, clone from the canonical
+repository and explicitly check out the reviewed PR SHA:
+
+```bash
+git clone https://github.com/oaslananka/kicad-mcp-pro-cloud.git kicad-cloud-acceptance
+cd kicad-cloud-acceptance
+git fetch origin refs/pull/63/head
+reviewed_sha=$(git rev-parse FETCH_HEAD)
+git show --no-patch --format='%H %s' "$reviewed_sha"
+# Review this exact commit and its successful PR checks before continuing.
+git checkout --detach "$reviewed_sha"
+
+# On this fresh VPS only, register this host's own read-only Doppler token.
+bash scripts/setup-vps-doppler.sh YOUR_DOPPLER_PROJECT YOUR_DOPPLER_CONFIG
+export KICAD_DOPPLER_SCOPED=true
+bash scripts/bootstrap-production-vps.sh preflight-pr 63 "$reviewed_sha"
+# Explicit first-install acceptance; requires live DNS/Tunnel/OAuth configuration:
+bash scripts/bootstrap-production-vps.sh install-pr 63 "$reviewed_sha"
+```
+
+The `reviewed_sha` variable is captured **once**, printed for independent
+operator review and checked against GitHub's advertised PR ref and exact-head
+CI/security gates on every bootstrap invocation. Never treat it as a moving
+branch alias or reuse a SHA after a later PR update. Do not run these commands on the
+already deployed production VPS. No `main` merge, production GitHub
+secret modification, live release timer installation, provider account
+write or paid-resource provisioning is part of this PR acceptance mode.
+The PR trial must use a **separate HTTPS hostname** and its own Doppler
+config and OAuth provider registration. The installation only verifies that
+the login form and OAuth discovery are available; the operator must also
+complete a real, owner-controlled OAuth round trip and check the approved
+callback URL separately before final acceptance. Accept actual backup,
+next-release and rollback behavior separately; do not confuse CI and a
+successful first install with these post-install recovery guarantees.
+
 ## New-server execution (explicit, safe by default)
 
-From the clean deployment worktree with the scoped Doppler credential:
+**After review and authorized merging**, the normal `main`-only installer
+continues to demand a clean checkout of the exact current remote `main` and
+a successful push CI run on that commit. It intentionally rejects PR
+checkouts regardless of their passing scans. From the clean deployment
+worktree with the scoped Doppler credential:
 
 ```bash
 export KICAD_DOPPLER_SCOPED=true
@@ -101,7 +155,7 @@ bash scripts/bootstrap-production-vps.sh preflight
 bash scripts/bootstrap-production-vps.sh install
 ```
 
-`preflight` makes no deployment/network/database changes. It validates the
+Both `preflight` and `preflight-pr` make no deployment/network/database changes. It validates the
 source identity, clean checked-out `origin/main`, Docker/Compose access,
 Doppler values without printing secrets, disabled connector flags, and both
 Compose files. It rejects a shared `ops_internal` ingress, existing KiCad app

@@ -4,7 +4,18 @@
 # Never called by CI or the existing VPS release timer.
 set -euo pipefail
 mode=${1:-preflight}
-[[ "$mode" == preflight || "$mode" == install ]] || { echo 'Usage: bootstrap-production-vps.sh [preflight|install]' >&2; exit 2; }
+[[ "$mode" == preflight || "$mode" == install || "$mode" == preflight-pr || "$mode" == install-pr ]] || {
+  echo 'Usage: bootstrap-production-vps.sh [preflight|install|preflight-pr PR_NUMBER HEAD_SHA|install-pr PR_NUMBER HEAD_SHA]' >&2; exit 2
+}
+acceptance=false
+if [[ "$mode" == preflight-pr || "$mode" == install-pr ]]; then
+  acceptance=true
+  [[ $# == 3 && "$2" =~ ^[1-9][0-9]{0,8}$ && "$3" =~ ^[a-f0-9]{40}$ ]] || {
+    echo 'Acceptance requires explicit PR number and exact 40-character head SHA' >&2; exit 2
+  }
+else
+  [[ $# -le 1 ]] || { echo 'Unexpected bootstrap arguments' >&2; exit 2; }
+fi
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 cd "$root"
 for command in docker git node doppler curl; do
@@ -12,9 +23,33 @@ for command in docker git node doppler curl; do
 done
 [[ $(git remote get-url origin) == 'https://github.com/oaslananka/kicad-mcp-pro-cloud.git' ]] || { echo 'Unexpected source repository' >&2; exit 2; }
 [[ -z $(git status --porcelain) ]] || { echo 'Refusing dirty checkout' >&2; exit 2; }
-[[ $(git rev-parse HEAD) == $(git rev-parse refs/remotes/origin/main) ]] || { echo 'Installation must use a locally verified current origin/main' >&2; exit 2; }
-remote_head=$(git ls-remote origin refs/heads/main | awk '{print $1}')
-[[ "$remote_head" == "$(git rev-parse HEAD)" ]] || { echo 'Source is not current remote main: abort' >&2; exit 2; }
+remote_main=$(git ls-remote origin refs/heads/main | awk '{print $1}')
+[[ "$remote_main" =~ ^[a-f0-9]{40}$ ]] || { echo 'Current main SHA unavailable' >&2; exit 2; }
+if [[ "$acceptance" == true ]]; then
+  # Production main cannot be merged as a prerequisite for testing this PR:
+  # that would activate the existing VPS release watcher. Only an exact,
+  # same-repo open PR with successful CI AND security scans may be installed.
+  revision=$(git rev-parse HEAD)
+  [[ "$revision" == "$3" ]] || { echo 'Acceptance checkout HEAD does not match supplied SHA' >&2; exit 2; }
+  advertised=$(git ls-remote origin "refs/pull/$2/head" | awk '{print $1}')
+  [[ "$advertised" == "$revision" ]] || { echo 'PR ref does not match reviewed checkout' >&2; exit 2; }
+  pr_payload=$(curl --fail --silent --show-error --max-time 15 \
+    --header 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/oaslananka/kicad-mcp-pro-cloud/pulls/$2")
+  checks_payload=$(curl --fail --silent --show-error --max-time 15 \
+    --header 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/oaslananka/kicad-mcp-pro-cloud/commits/$revision/check-runs?per_page=100")
+  runs_payload=$(curl --fail --silent --show-error --max-time 15 \
+    --header 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/oaslananka/kicad-mcp-pro-cloud/actions/workflows/ci.yml/runs?head_sha=$revision&event=pull_request&per_page=20")
+  printf '%s\0%s\0%s' "$pr_payload" "$checks_payload" "$runs_payload" |
+    node scripts/verify-bootstrap-pr.mjs "$2" "$revision" "$remote_main"
+else
+  [[ $(git rev-parse HEAD) == $(git rev-parse refs/remotes/origin/main) ]] || {
+    echo 'Installation must use a locally verified current origin/main' >&2; exit 2
+  }
+  [[ "$remote_main" == "$(git rev-parse HEAD)" ]] || { echo 'Source is not current remote main: abort' >&2; exit 2; }
+fi
 docker info >/dev/null
 docker compose version >/dev/null
 # Refuse existing KiCad state BEFORE fetching any configuration/secret.
@@ -39,10 +74,12 @@ fi
 scripts/doppler-runtime.sh docker compose -f infra/compose.production.yml config --quiet
 scripts/doppler-runtime.sh docker compose -f infra/compose.cloudflare.yml config --quiet
 printf 'New VPS preflight passed: reviewed Git source, Doppler config, isolated ingress selector and Compose syntax.\n'
-if [[ "$mode" == preflight ]]; then exit 0; fi
-# --install is intentionally explicit. Require successful main CI on the
-# exact Git SHA before provisioning anything; never trust just a branch name.
+if [[ "$mode" == preflight || "$mode" == preflight-pr ]]; then exit 0; fi
+# All install modes are intentionally explicit. Normal installation requires
+# successful main push CI; PR acceptance already checked its security/CI
+# gates before secret access or Docker provisioning.
 revision=$(git rev-parse HEAD)
+if [[ "$acceptance" == false ]]; then
 ci_payload=$(curl --fail --silent --show-error --max-time 15 \
   --header 'Accept: application/vnd.github+json' \
   'https://api.github.com/repos/oaslananka/kicad-mcp-pro-cloud/actions/workflows/ci.yml/runs?branch=main&event=push&per_page=20')
@@ -58,6 +95,9 @@ process.stdin.on("end",()=>{
   echo 'Exact-main successful CI proof unavailable; first install blocked' >&2
   exit 1
 fi
+fi
+# Acceptance installations never enable a timer and cannot be automatically
+# deployed from main while the PR is still open.
 # Does not configure DNS, provider OAuth, any other account or existing VPS.
 docker network create --driver bridge "$network" >/dev/null
 docker build --pull=false --build-arg "APP_REVISION=$revision" -t kicad-mcp-pro-cloud:production .
@@ -92,5 +132,9 @@ done
 PUBLIC_ORIGIN="$public_origin" EXPECTED_GOOGLE_OAUTH="$expected_google" EXPECTED_REVISION="$revision" node scripts/production-smoke.mjs
 # A second VPS polling the same GitHub main would trigger unapproved parallel
 # production releases. Enabling its timer is a separate owner-controlled cutover.
-printf 'PASS: new VPS initial installation verified at %s\n' "$public_origin"
+if [[ "$acceptance" == true ]]; then
+  printf 'PASS: PR #%s at %s accepted in a fresh, timer-free VPS instance: %s\n' "$2" "$revision" "$public_origin"
+else
+  printf 'PASS: new VPS initial installation verified at %s\n' "$public_origin"
+fi
 printf 'Release timer NOT enabled. Accept the owner cutover and stop the old VPS timer before enabling the new one.\n'
