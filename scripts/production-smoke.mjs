@@ -45,6 +45,8 @@ const unauthenticated=await fetch("https://kicad-mcp-pro.oaslananka.dev/mcp",{
 assert.equal(unauthenticated.status,401,"MCP must reject untrusted clients");
 const signIn=await fetch("https://kicad-mcp-pro.oaslananka.dev/sign-in",options);
 assert.equal(signIn.status,200,"GitHub sign-in page must be enabled");
+assert.equal(signIn.headers.get("referrer-policy"),"same-origin",
+  "Native HTML form POST must retain same-origin Origin in Chrome");
 const signInBody=await signIn.text();
 assert.match(signInBody,/Continue with GitHub/,
   "First login must offer configured GitHub OAuth");

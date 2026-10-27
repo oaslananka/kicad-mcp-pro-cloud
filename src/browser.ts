@@ -14,7 +14,9 @@ const htmlHeaders = {
   "Content-Type":"text/html; charset=utf-8",
   "Cache-Control":"no-store",
   "X-Content-Type-Options":"nosniff",
-  "Referrer-Policy":"no-referrer",
+  // HTML form navigations with no-referrer transmit Origin: null in Chrome;
+  // same-origin preserves the verified Origin for first-party OAuth POSTs.
+  "Referrer-Policy":"same-origin",
   "Content-Security-Policy":"default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'"
 };
 
