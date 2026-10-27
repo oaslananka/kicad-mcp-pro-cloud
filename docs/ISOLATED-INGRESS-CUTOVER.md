@@ -1,5 +1,14 @@
 # KiCad Cloud — isolated ingress candidate and rollback (NOT deployed)
 
+**Current stage (27 October 2026):** An existing, independently named
+KiCad-only Cloudflare Tunnel has a remotely managed route staged for the KiCad
+hostname and origin `http://app:8787`, with Host header fixed and 404 fallback.
+The Tunnel is **inactive with zero connectors**, and production DNS continues
+to target the original healthy shared Tunnel. No public traffic switched.
+The production DB has separately reached schema **012**, but device API and WSS
+are still OFF. The Free zone's only rate-limit rule remains occupied by an
+unrelated leaked-credential guard. Isolation + edge protection remains BLOCKED.
+
 **Scope:** this is a reviewed *candidate* overlay, not a production change.
 Do not start containers or alter a Cloudflare hostname route by following the
 validation instructions alone. The existing `ops-cloudflared` connector
