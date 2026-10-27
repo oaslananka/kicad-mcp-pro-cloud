@@ -44,9 +44,14 @@ jobs:
           # The dedicated VPS timer reads this same successful main CI run,
           # builds locally, and deploys with a single-image rollback.
           for attempt in $(seq 1 40); do
-            live=$(curl --fail --silent --show-error --max-time 10 --retry 0 \
-              https://kicad-mcp-pro.oaslananka.dev/health | \
-              python3 -c 'import json,sys; print(json.load(sys.stdin).get("revision","unknown"))') || live=unreachable
+            if curl --fail --silent --show-error --max-time 10 --retry 0 \
+              --output "$RUNNER_TEMP/kicad-cloud-health.json" \
+              https://kicad-mcp-pro.oaslananka.dev/health; then
+              live=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("revision","unknown"))' \
+                "$RUNNER_TEMP/kicad-cloud-health.json") || live=unreachable
+            else
+              live=unreachable
+            fi
             if [[ "$live" == "$EXPECTED_REVISION" ]]; then
               echo "Deployed exact CI-verified revision $EXPECTED_REVISION";
               exit 0
@@ -69,7 +74,7 @@ jobs:
         if: steps.version.outputs.superseded == 'false'
         run: |
           npm ci --ignore-scripts
-          npx playwright install --with-deps chromium
+          ./node_modules/.bin/playwright install --with-deps chromium
       - name: Independent public production smoke
         if: steps.version.outputs.superseded == 'false'
         run: node scripts/production-smoke.mjs
