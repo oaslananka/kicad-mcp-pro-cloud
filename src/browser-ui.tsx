@@ -1,19 +1,18 @@
 import {renderPage,Landing,SignIn,Account,Notice} from "./ui-shell.js";
 export function renderLanding(identityEnabled:boolean){
-  return renderPage({title:"Engineering, connected.",kind:"home",navEnabled:identityEnabled,eyebrow:"YOUR DESIGN. YOUR CONTROL.",
-    summary:"A secure AI bridge for KiCad workflows — transparent permissions, local project ownership, and a modern connected experience.",
+  return renderPage({title:"KiCad MCP Cloud",kind:"home",navEnabled:identityEnabled,
+    eyebrow:"Cloud console",summary:"Manage AI account access today. Device pairing and local KiCad control are not enabled yet.",
     children:<Landing identityEnabled={identityEnabled}/>});
 }
-export function renderSignIn(
-  query:string,providers:ReadonlyArray<"google"|"github">=["google","github"]
-){
-  return renderPage({title:"Make the connection.",kind:"sign-in",eyebrow:"AUTHORIZED ACCESS",
-    summary:"A seamless sign-in for a controlled, local-first engineering workflow.",children:<SignIn query={query} providers={providers}/>});
+export function renderSignIn(query:string,providers:ReadonlyArray<"google"|"github">=["google","github"]){
+  return renderPage({title:"Sign in",kind:"sign-in",eyebrow:"Account access",
+    summary:"Use an account to manage AI connections and permissions.",
+    children:<SignIn query={query} providers={providers}/>});
 }
 export function renderAccount(name:string){
-  return renderPage({title:"Your workspace.",kind:"account",eyebrow:"ACCOUNT OVERVIEW",
-    summary:"Manage your trusted AI connections and account access.",children:<Account name={name}/>});
+  return renderPage({title:"Workspace overview",kind:"account",eyebrow:"Workspace / Overview",
+    summary:"Your account, connected AI apps, and device availability in one place.",children:<Account name={name}/>});
 }
 export function renderNotice(title:string,message:string){
-  return renderPage({title,kind:"notice",eyebrow:"ACCOUNT SECURITY",children:<Notice message={message}/>});
+  return renderPage({title,kind:"notice",eyebrow:"Account access",children:<Notice message={message}/>});
 }

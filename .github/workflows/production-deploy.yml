@@ -84,3 +84,6 @@ jobs:
       - name: Native Chromium GitHub login form acceptance
         if: steps.version.outputs.superseded == 'false'
         run: node scripts/production-browser-smoke.mjs
+      - name: Responsive workspace UX acceptance
+        if: steps.version.outputs.superseded == 'false'
+        run: node scripts/ui-visual-smoke.mjs
