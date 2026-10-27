@@ -111,3 +111,11 @@ test("distinct IPv6 formats normalize to a single rate-budget key",async()=>{
   }
   assert.equal(calls[0].key,calls[2].key);
 });
+
+test("unexpected approved-origin forwarding errors fail closed",async()=>{
+  const {env}=bindings();
+  const response=await handleCandidate(request("POST",R[0][1]),env,
+    async()=>{throw new Error("upstream offline");});
+  assert.equal(response.status,503);
+  assert.equal(response.headers.get("Cache-Control"),"no-store");
+});

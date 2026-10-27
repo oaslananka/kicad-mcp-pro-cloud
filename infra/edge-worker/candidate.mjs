@@ -83,13 +83,18 @@ export async function handleCandidate(request,env,forward){
   // Do not rewrite Host, Authorization, CF-Connecting-IP or Upgrade.
   // A real Tunnel Worker subrequest may still modify source attribution:
   // this requires network acceptance before a route can be enabled.
-  return forward(request);
+  try{
+    return await forward(request);
+  }catch{
+    return deny(503);
+  }
 }
 // Only hardcoded, approved destination URLs ever reach fetch(). A client
 // cannot select another scheme/host/port/path through its request URL.
 async function forwardKnownRoute(request){
-  const path=new URL(request.url).pathname;
-  switch(path){
+  try{
+    const path=new URL(request.url).pathname;
+    switch(path){
     case "/api/v1/pairing/device/challenge":
       return fetch(new Request(
         "https://kicad-mcp-pro.oaslananka.dev/api/v1/pairing/device/challenge",request));
@@ -101,6 +106,10 @@ async function forwardKnownRoute(request){
         "https://kicad-mcp-pro.oaslananka.dev/api/v1/connector/ws",request));
     default:
       return deny(404);
+    }
+  }catch{
+    // A failed upstream fetch never bypasses the protective gateway.
+    return deny(503);
   }
 }
 export default {
