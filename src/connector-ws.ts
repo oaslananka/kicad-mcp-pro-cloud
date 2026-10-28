@@ -232,7 +232,12 @@ export function attachConnectorWebSocket(
             // The OAuth authority is bound in the pending closure below.
             const allowed=await options.connections.authorizeOutgoingSummary(
               ws,waitingOAuth.get(pending)!,pending.projectId);
-            if(!allowed||closed()){
+            // The database grant check is asynchronous. Neither its start
+            // time nor a previously valid socket extends the signed request
+            // deadline or the device session lease.
+            if(!allowed||closed()||ws.readyState!==WebSocket.OPEN||
+               Date.now()>=pending.deadline||
+               Date.now()>=(entry.sessionDeadline??0)){
               pending.resolve(null);fail();return;
             }
             send({kind:"connector.read_ack",version:1,sequence:1,

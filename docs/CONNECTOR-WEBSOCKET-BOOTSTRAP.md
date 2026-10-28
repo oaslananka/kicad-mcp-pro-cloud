@@ -59,6 +59,32 @@ are intentionally **not** asserted to provide distributed DDoS prevention:
 production enablement needs an ingress rate limiter and an atomic
 database-backed per-device issuance budget across all app replicas.
 
+## Strict expiry after asynchronous read authorization
+
+The optional server-to-device `project_summary` relay issues a single
+`connector.authorized_read` with a short, absolute signed request deadline.
+When the local device replies, the Cloud transport checks the exact
+request/project identity and deadline, then asynchronously revalidates the
+owner/OAuth-client project grant and active device binding in PostgreSQL.
+
+**A passing database query is not an extension of the original deadline.**
+If the query finishes after the original request deadline or after the
+bounded device session expires, the server discards the result, closes
+the WebSocket with policy code 1008, and sends **no**
+`connector.read_ack` or HTTP data. Both deadlines are rechecked
+**after** the awaited authorization and before the ACK. The HTTP handler
+independently rechecks JWT expiry, token cutoff and the current
+project/device grant before sending an HTTP result.
+
+The regression `test/connector-deadline-after-authorization.test.ts`
+simulates a previously authorized, real localhost WebSocket read whose
+database grant check completes after the signed deadline: it must return
+`null`, emit no ACK and close with 1008. The full disposable PostgreSQL
+17 suite also verifies the normal one-shot result/ACK and in-flight
+grant, token and device revocation; test actors and keys are synthetic.
+This does **not** establish production ingress, real user OAuth, or
+independent local operator approval.
+
 ## Not yet authorized or integrated
 
 - Native local desktop connector enrollment, secure Ed25519 private-key
