@@ -287,6 +287,45 @@ test("premium public interface and same-origin stylesheet use hardened headers",
   assert.equal((await fetch(endpoint+"/assets/ui.js")).status,404);
 });
 
+test("Cloud HTTP read refuses grant revocation after relay result but before reply",async()=>{
+  const path="/api/v1/connector/project-summary";
+  let grantActive=true;
+  let lookedUp=0;
+  const boundedInventory:Inventory={
+    ...inventory,
+    async getProject(owner,clientId,projectId){
+      lookedUp++;
+      if(!grantActive)return null;
+      return inventory.getProject(owner,clientId,projectId);
+    }
+  };
+  const relay={
+    async requestSummary(_actor:unknown,_device:string,projectId:string){
+      // Simulates a real owner revocation in the interleaving between the
+      // WSS relay's acceptance and the HTTP response write.
+      grantActive=false;
+      return {kind:"connector.local_read_preview" as const,version:1 as const,
+        requestId:id,projectId,operation:"project_summary" as const,
+        files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
+    }
+  };
+  const proxy=createHttpServer(config,boundedInventory,verify,{summaryRelay:()=>relay});
+  await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
+  try{
+    const port=(proxy.address() as AddressInfo).port;
+    const result=await fetch("http://127.0.0.1:"+port+path,{
+      method:"POST",headers:headers(),
+      body:JSON.stringify({deviceId:mockProject.deviceId,projectId:id})
+    });
+    assert.equal(result.status,403,
+      "Revoke-after-relay must not return project presence bytes to the client");
+    assert.equal(lookedUp,1);
+    assert.deepEqual(await result.json(),{error:"forbidden"});
+  }finally{
+    await new Promise<void>(resolve=>proxy.close(()=>resolve()));
+  }
+});
+
 test("Cloud read route is absent without connector and validates OAuth and payload when attached",async()=>{
   const path="/api/v1/connector/project-summary";
   const validBody=JSON.stringify({deviceId:mockProject.deviceId,projectId:id});
@@ -321,6 +360,13 @@ test("Cloud read route is absent without connector and validates OAuth and paylo
           .actor.accessTokenIssuedAtSeconds},
       deviceId:mockProject.deviceId,projectId:id
     });
+    // Even a buggy relay must not authorize a different device merely
+    // because the client has a grant for this project.
+    const wrongDevice=await send("test-user-a",JSON.stringify({
+      deviceId:"11111111-1111-4111-8111-111111111111",projectId:id
+    }));
+    assert.equal(wrongDevice.status,403);
+    assert.deepEqual(await wrongDevice.json(),{error:"forbidden"});
   }finally{
     accessAllowed=true;
     await new Promise<void>(resolve=>proxy.close(()=>resolve()));

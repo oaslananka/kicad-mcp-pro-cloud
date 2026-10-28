@@ -287,6 +287,13 @@ async function handleRequest(
         if(!await inventory.isAccessTokenAllowed(actor.sub,actor.clientId,actor.issuedAt)){
           deny(res,403,"forbidden");return;
         }
+        // Device/project grants may be revoked after the socket-side check
+        // but before this HTTP response is written. Re-evaluate the current
+        // owner/client grant and device binding, never only the token cutoff.
+        const currentProject=await inventory.getProject(actor.sub,actor.clientId,fields.projectId);
+        if(!currentProject||currentProject.deviceId!==fields.deviceId){
+          deny(res,403,"forbidden");return;
+        }
         json(res,200,result);return;
       }
       if (path !== "/mcp") {
