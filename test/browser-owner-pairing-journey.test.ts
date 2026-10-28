@@ -30,8 +30,11 @@ const config:Config={
   allowedOrigins:[],managementClientId:"manager"
 };
 const htmlCsrf=(html:string,action:string):string=>{
-  const escaped=action.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-  const result=new RegExp('<form action="'+escaped+'"[\\s\\S]*?name="csrf" value="([^"]+)"').exec(html);
+  const start=html.indexOf('<form action="'+action+'"');
+  assert.ok(start>=0,"expected form "+action);
+  const stop=html.indexOf("</form>",start);
+  assert.ok(stop>start,"expected form close "+action);
+  const result=/name="csrf" value="([^"]+)"/.exec(html.slice(start,stop));
   assert.ok(result?.[1],"expected CSRF for "+action);
   return result[1];
 };
@@ -39,14 +42,28 @@ const pageCookie=(response:Response):string=>
   (response.headers.get("set-cookie")??"").split(";")[0];
 const identityCookie=(actor:string):string=>"journey_actor="+actor;
 const ownerCookie=identityCookie(owner);
-const postForm=(base:string,path:string,fields:Record<string,string>,cookie:string,
-  origin=config.publicOrigin)=>fetch(base+path,{
-  method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded",
-    Origin:origin,Cookie:cookie},body:new URLSearchParams(fields),redirect:"manual"
-});
-const devicePost=(base:string,path:string,data:object)=>fetch(base+path,{
-  method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)
-});
+type BrowserAction="review"|"enable"|"register"|"grant"|"revoke";
+function postForm(base:string,action:BrowserAction,fields:Record<string,string>,cookie:string,
+  origin=config.publicOrigin):Promise<Response>{
+  const init:RequestInit={method:"POST",headers:{
+    "Content-Type":"application/x-www-form-urlencoded",Origin:origin,Cookie:cookie
+  },body:new URLSearchParams(fields),redirect:"manual"};
+  // Fixed endpoint allowlist: no untrusted input can become an HTTP target.
+  switch(action){
+    case "review":return fetch(base+"/devices/pairing/review",init);
+    case "enable":return fetch(base+"/devices/enable",init);
+    case "register":return fetch(base+"/devices/projects/create",init);
+    case "grant":return fetch(base+"/devices/projects/grant",init);
+    case "revoke":return fetch(base+"/devices/revoke",init);
+  }
+}
+function devicePost(base:string,action:"challenge"|"redeem",data:object):Promise<Response>{
+  const init:RequestInit={method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(data)};
+  return action==="challenge"?
+    fetch(base+"/api/v1/pairing/device/challenge",init):
+    fetch(base+"/api/v1/pairing/device/redeem",init);
+}
 async function seededIdentity(db:Pool):Promise<BrowserIdentity>{
   return {
     handler:async()=>new Response(null,{status:404}),
@@ -96,7 +113,7 @@ test("real HTTP owner journey: DB pairing, browser consent gates, project grant 
       assert.equal((await fetch(base+"/devices/pairing",{redirect:"manual"})).status,303);
       const keys=generateKeyPairSync("ed25519");
       const publicKeyDer=keys.publicKey.export({format:"der",type:"spki"}) as Buffer;
-      const issued=await devicePost(base,"/api/v1/pairing/device/challenge",{
+      const issued=await devicePost(base,"challenge",{
         alias:"Owner approved local test",publicKeyDer:publicKeyDer.toString("base64")
       });
       assert.equal(issued.status,201);
@@ -110,14 +127,14 @@ test("real HTTP owner journey: DB pairing, browser consent gates, project grant 
       const approvalCookie=pageCookie(approvalPage);
       const form={challenge_id:challenge.challengeId,user_code:challenge.userCode,
         decision:"approve",csrf:approvalCsrf};
-      assert.equal((await postForm(base,"/devices/pairing/review",form,
+      assert.equal((await postForm(base,"review",form,
         approvalCookie+"; "+identityCookie(other))).status,403);
-      const approved=await postForm(base,"/devices/pairing/review",form,
+      const approved=await postForm(base,"review",form,
         approvalCookie+"; "+ownerCookie);
       assert.equal(approved.status,303);
       const proof=sign(null,redemptionProof(challenge.challengeId,challenge.deviceCode),
         keys.privateKey).toString("base64url");
-      const redeemed=await devicePost(base,"/api/v1/pairing/device/redeem",{
+      const redeemed=await devicePost(base,"redeem",{
         challengeId:challenge.challengeId,deviceCode:challenge.deviceCode,signature:proof
       });
       assert.equal(redeemed.status,200);
@@ -126,7 +143,7 @@ test("real HTTP owner journey: DB pairing, browser consent gates, project grant 
       };
       assert.equal(enrolled.enabled,false);
       assert.equal(enrolled.deviceFingerprint,challenge.deviceFingerprint);
-      assert.equal((await devicePost(base,"/api/v1/pairing/device/redeem",{
+      assert.equal((await devicePost(base,"redeem",{
         challengeId:challenge.challengeId,deviceCode:challenge.deviceCode,signature:proof
       })).status,400,"one-use proof must not be replayed");
       assert.equal(await devices.createProject(owner,enrolled.deviceId,"Before enable"),null);
@@ -136,15 +153,15 @@ test("real HTTP owner journey: DB pairing, browser consent gates, project grant 
       assert.match(deviceHtml,/Disabled/);
       const enabledCsrf=htmlCsrf(deviceHtml,"/devices/enable");
       const enabledCookie=pageCookie(devicePage)+"; "+ownerCookie;
-      assert.equal((await postForm(base,"/devices/enable",{
+      assert.equal((await postForm(base,"enable",{
         device_id:enrolled.deviceId,csrf:enabledCsrf
       },enabledCookie,"https://hostile.example.invalid")).status,403);
-      assert.equal((await postForm(base,"/devices/enable",{
+      assert.equal((await postForm(base,"enable",{
         device_id:enrolled.deviceId,csrf:enabledCsrf
       },enabledCookie)).status,303);
       const projectPage=await fetch(base+"/devices",{headers:{Cookie:ownerCookie}});
       const projectCsrf=htmlCsrf(await projectPage.text(),"/devices/projects/create");
-      assert.equal((await postForm(base,"/devices/projects/create",{
+      assert.equal((await postForm(base,"register",{
         device_id:enrolled.deviceId,csrf:projectCsrf,alias:"Test PCB"
       },pageCookie(projectPage)+"; "+ownerCookie)).status,303);
       const projects=await devices.listProjects(owner);
@@ -162,31 +179,31 @@ test("real HTTP owner journey: DB pairing, browser consent gates, project grant 
       const grantHtml=await grantPage.text();
       assert.match(grantHtml,/Allow read-only metadata/);
       assert.match(grantHtml,/journey-oauth-client/);
-      assert.match(grantHtml,new RegExp(projectId));
+      assert.ok(grantHtml.includes(projectId));
       const grantCsrf=htmlCsrf(grantHtml,"/devices/projects/grant");
       const grantCookie=pageCookie(grantPage)+"; "+ownerCookie;
-      assert.equal((await postForm(base,"/devices/projects/grant",{
+      assert.equal((await postForm(base,"grant",{
         project_id:projectId,client_id:"unconsented-client",enabled:"true",csrf:grantCsrf
       },grantCookie)).status,404);
-      assert.equal((await postForm(base,"/devices/projects/grant",{
+      assert.equal((await postForm(base,"grant",{
         project_id:projectId,client_id:client,enabled:"true",csrf:grantCsrf
       },grantCookie)).status,303);
       const stored=await db.query<{enabled:boolean;max_mode:string}>(
         "SELECT enabled,max_mode FROM project_client_grants WHERE project_id=$1 AND client_id=$2",
         [projectId,client]);
       assert.deepEqual(stored.rows,[{enabled:true,max_mode:"readonly"}]);
-      assert.equal((await postForm(base,"/devices/projects/grant",{
+      assert.equal((await postForm(base,"grant",{
         project_id:projectId,client_id:client,enabled:"false",csrf:grantCsrf
       },grantCookie)).status,303);
       assert.equal((await db.query<{enabled:boolean}>(
         "SELECT enabled FROM project_client_grants WHERE project_id=$1",
         [projectId])).rows[0].enabled,false);
-      assert.equal((await postForm(base,"/devices/projects/grant",{
+      assert.equal((await postForm(base,"grant",{
         project_id:projectId,client_id:client,enabled:"true",csrf:grantCsrf
       },grantCookie)).status,303);
       const revokePage=await fetch(base+"/devices",{headers:{Cookie:ownerCookie}});
       const revokeToken=htmlCsrf(await revokePage.text(),"/devices/revoke");
-      assert.equal((await postForm(base,"/devices/revoke",{
+      assert.equal((await postForm(base,"revoke",{
         device_id:enrolled.deviceId,csrf:revokeToken
       },pageCookie(revokePage)+"; "+ownerCookie)).status,303);
       assert.equal(await devices.enableDevice(owner,enrolled.deviceId),false);
