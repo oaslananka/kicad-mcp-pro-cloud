@@ -1,3 +1,4 @@
+import {createHmac} from "node:crypto";
 // Read public deployment selectors from Doppler-injected environment.
 // Never print the full environment, access tokens or credential-bearing URLs.
 const origin=process.env.PUBLIC_ORIGIN??"";
@@ -25,7 +26,7 @@ else if(kind==="network")process.stdout.write(network+"\n");
 else if(kind==="google"){
   checkProviderPairs();
   process.stdout.write(String(google)+"\n");
-}else if(kind==="validate"){
+}else if(kind==="validate"||kind==="fingerprint"){
   checkProviderPairs();
   // The fresh-VPS contract serves a first-party OAuth login, not an
   // externally provisioned identity system. Legacy production can continue
@@ -63,5 +64,23 @@ else if(kind==="google"){
   }
   if(process.env.PAIRING_DEVICE_API_ENABLED==="true"||process.env.CONNECTOR_WS_ENABLED==="true")
     throw new Error("DEVICE_ROLLOUT_REQUIRES_SEPARATE_SECURITY_ACCEPTANCE");
-  process.stdout.write("Portable runtime configuration valid (secrets not printed)\n");
-}else throw new Error("Usage: portable-config.mjs origin|network|google|validate");
+  if(kind==="fingerprint"){
+    // No raw credentials are emitted or persisted. Keyed HMAC makes this a
+    // change detector, not a standalone hash of guessable client IDs.
+    // Use the production-random Better Auth root secret as the HMAC key.
+    const keys=[
+      "PUBLIC_ORIGIN","OAUTH_ISSUER","OAUTH_JWKS_URL","OAUTH_AUDIENCE",
+      "KICAD_DB_PASSWORD","AUTH_MODE","BETTER_AUTH_SECRET",
+      "GITHUB_CLIENT_ID","GITHUB_CLIENT_SECRET",
+      "GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","MANAGEMENT_CLIENT_ID",
+      "ALLOWED_ORIGINS","KICAD_TUNNEL_NETWORK","CLOUDFLARE_TUNNEL_TOKEN",
+      "PAIRING_DEVICE_API_ENABLED","CONNECTOR_WS_ENABLED"
+    ];
+    const values=keys.map(key=>[key,process.env[key]??null]);
+    const digest=createHmac("sha256",process.env.BETTER_AUTH_SECRET)
+      .update(JSON.stringify(values)).digest("hex");
+    process.stdout.write(digest+"\n");
+  }else{
+    process.stdout.write("Portable runtime configuration valid (secrets not printed)\n");
+  }
+}else throw new Error("Usage: portable-config.mjs origin|network|google|validate|fingerprint");

@@ -52,6 +52,34 @@ test("fail closed on unsafe or inconsistent deployment config",()=>{
     assert.doesNotMatch(out.stderr,/not-a-secret-test-fixture/);
   }
 });
+test("Doppler configuration fingerprint changes on credential or routing drift without revealing secrets",()=>{
+  const baseline=cli("fingerprint");
+  assert.equal(baseline.status,0,baseline.stderr);
+  assert.match(baseline.stdout.trim(),/^[a-f0-9]{64}$/);
+  assert.equal(cli("fingerprint").stdout,baseline.stdout);
+  for(const delta of [
+    {KICAD_DB_PASSWORD:"different-secret-test-fixture"},
+    {BETTER_AUTH_SECRET:"another-synthetic-auth-secret-value-that-is-long"},
+    {GITHUB_CLIENT_SECRET:"different-github-client-credential"},
+    {CLOUDFLARE_TUNNEL_TOKEN:"different-tunnel-credential"},
+    {PUBLIC_ORIGIN:"https://new-pcb.example.test",
+     OAUTH_ISSUER:"https://new-pcb.example.test/api/auth",
+     OAUTH_JWKS_URL:"https://new-pcb.example.test/api/auth/jwks",
+     OAUTH_AUDIENCE:"https://new-pcb.example.test/mcp"},
+    {MANAGEMENT_CLIENT_ID:"new-owner"},
+    {ALLOWED_ORIGINS:"https://client.example.test"},
+    {KICAD_TUNNEL_NETWORK:"alternative_ingress"}
+  ]){
+    const result=cli("fingerprint",delta);
+    assert.equal(result.status,0,result.stderr);
+    assert.match(result.stdout.trim(),/^[a-f0-9]{64}$/);
+    assert.notEqual(result.stdout,baseline.stdout);
+    assert.doesNotMatch(result.stdout,/synthetic|fixture|credential|secret|token/i);
+  }
+  const invalid=cli("fingerprint",{BETTER_AUTH_SECRET:"short"});
+  assert.notEqual(invalid.status,0);
+  assert.doesNotMatch(invalid.stderr,/synthetic-auth-fixture/);
+});
 test("new VPS accepts exact 32-character auth secret and HTTPS allowlist",()=>{
   const result=cli("validate",{
     BETTER_AUTH_SECRET:"x".repeat(32),

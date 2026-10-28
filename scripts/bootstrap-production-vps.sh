@@ -61,8 +61,20 @@ fi
 if docker volume inspect kicad-cloud_production_database >/dev/null 2>&1; then
   echo 'Existing database volume detected: refusing potential data reuse' >&2; exit 1
 fi
+# A previous partial installation might leave just the Cloudflare edge
+# container, even if its old ingress network was renamed in Doppler.
+if docker container inspect kicad-cloud-edge-cloudflared-1 >/dev/null 2>&1; then
+  echo 'Existing KiCad Cloudflare tunnel container detected: refusing first install' >&2; exit 1
+fi
 [[ "${KICAD_DOPPLER_SCOPED:-}" == true ]] || { echo 'Use a directory-scoped, read-only Doppler service token (KICAD_DOPPLER_SCOPED=true)' >&2; exit 2; }
 scripts/doppler-runtime.sh node scripts/portable-config.mjs validate
+# First-install settings are fetched multiple times as isolated processes.
+# Detect changed Doppler values (including secrets) across the image build
+# without storing or printing those values in a repo artifact or shell log.
+config_fingerprint=$(scripts/doppler-runtime.sh node scripts/portable-config.mjs fingerprint)
+[[ "$config_fingerprint" =~ ^[a-f0-9]{64}$ ]] || {
+  echo 'Invalid Doppler configuration fingerprint; abort' >&2; exit 2
+}
 network=$(scripts/doppler-runtime.sh node scripts/portable-config.mjs network)
 [[ "$network" != ops_internal ]] || { echo 'Use a dedicated KICAD_TUNNEL_NETWORK on a new VPS; do not reuse the legacy shared network' >&2; exit 2; }
 # Probe only secret presence; never emit the Tunnel token.
@@ -143,6 +155,11 @@ assert_reviewed_source_still_current
 # while building, stop without leaving a half-provisioned network or database.
 docker build --pull=false --build-arg "APP_REVISION=$revision" -t kicad-mcp-pro-cloud:production .
 assert_reviewed_source_still_current
+latest_fingerprint=$(scripts/doppler-runtime.sh node scripts/portable-config.mjs fingerprint)
+if [[ "$latest_fingerprint" != "$config_fingerprint" ]]; then
+  echo 'Doppler configuration changed during image build; abort before network/database start' >&2
+  exit 1
+fi
 docker network create --driver bridge "$network" >/dev/null
 scripts/doppler-runtime.sh docker compose -f infra/compose.production.yml up -d db
 healthy=false

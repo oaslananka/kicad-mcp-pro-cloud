@@ -138,7 +138,14 @@ config and OAuth provider registration. During installation, the verified PR hea
 clean local worktree are checked again before creating resources and after the
 OCI image build; if anything changes mid-build, it aborts before allocating
 the ingress network or touching the database. A candidate image may remain
-after this refusal; review it rather than blindly retrying.
+after this refusal; review it rather than blindly retrying. The installer
+also pins a secret-safe, keyed fingerprint of the Doppler configuration
+during preflight and verifies it again after the image build before allocating
+the network or database. A credential, hostname, OAuth or network change
+during that build stops the initial installation without printing the changed
+value. Do not rotate the Doppler config while an installation is in progress;
+this extra check is not a substitute for controlled secret rotation once
+a persistent database is running.
 The installation only verifies that
 the login form and OAuth discovery are available; the operator must also
 complete a real, owner-controlled OAuth round trip and check the approved
@@ -164,9 +171,9 @@ bash scripts/bootstrap-production-vps.sh install
 Both `preflight` and `preflight-pr` make no deployment/network/database changes. It validates the
 source identity, clean checked-out `origin/main`, Docker/Compose access,
 Doppler values without printing secrets, disabled connector flags, and both
-Compose files. It rejects a shared `ops_internal` ingress, existing KiCad app
-or database containers, an existing name-colliding ingress network and
-missing Cloudflare token. This is intentionally **not** a migration or upgrade
+Compose files. It rejects a shared `ops_internal` ingress, existing KiCad app,
+database or edge tunnel containers, existing database volumes, a name-colliding
+ingress network and a missing Cloudflare token. This is intentionally **not** a migration or upgrade
 command for an already deployed VPS.
 
 `install` explicitly creates only the named dedicated Docker ingress bridge,

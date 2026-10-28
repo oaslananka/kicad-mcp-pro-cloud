@@ -45,6 +45,7 @@ set -eu
 printf 'docker %s\n' "$*" >> "$MOCK_LOG"
 if [[ "$*" == 'container inspect kicad-cloud-app-1' && "$MOCK_EXISTING" == container ]]; then exit 0; fi
 if [[ "$*" == 'volume inspect kicad-cloud_production_database' && "$MOCK_EXISTING" == volume ]]; then exit 0; fi
+if [[ "$*" == 'container inspect kicad-cloud-edge-cloudflared-1' && "$MOCK_EXISTING" == edge ]]; then exit 0; fi
 case "$*" in
   info|'compose version'|'compose -f infra/compose.production.yml config --quiet'|'compose -f infra/compose.cloudflare.yml config --quiet') exit 0;;
   'container inspect '*|'volume inspect '*|'network inspect '*) exit 1;;
@@ -60,6 +61,10 @@ set -eu
 printf 'doppler %s\n' "$*" >> "$MOCK_LOG"
 [[ "$1" == run && "$2" == --no-read-env && "$3" == -- ]] || exit 97
 shift 3
+if [[ "${MOCK_DOPPLER_ROTATE_AFTER_BUILD:-}" == yes && "$*" == 'node scripts/portable-config.mjs fingerprint' ]] &&
+   grep -q '^docker build ' "$MOCK_LOG"; then
+  export BETTER_AUTH_SECRET='second-synthetic-auth-secret-after-image-build'
+fi
 exec "$@"
 MOCK
 cat > "$bin/curl" <<'MOCK'
@@ -139,7 +144,7 @@ output=$(run_fixture preflight '' no)
 [[ "$output" == *'New VPS preflight passed'* ]]
 assert_no_mutation
 echo 'PASS: non-mutating new VPS preflight'
-for existing in container volume; do
+for existing in container volume edge; do
   if output=$(run_fixture preflight "$existing" no 2>&1); then
     echo 'FAIL: existing state was accepted' >&2
     exit 1
@@ -222,3 +227,20 @@ for scenario in pr main closed dirty; do
   echo "PASS: $scenario changed after build -> no database started"
 done
 unset MOCK_ADVANCE_AFTER_BUILD MOCK_CLOSE_AFTER_BUILD MOCK_DIRTY_AFTER_BUILD
+
+
+# Even a valid CI-verified PR must refuse an in-flight Doppler credential
+# rotation after the image has built and before any ingress/DB provisioning.
+: > "$log"
+if out=$(MOCK_EXISTING='' MOCK_CI_PASS=yes MOCK_DOPPLER_ROTATE_AFTER_BUILD=yes \
+  bash scripts/bootstrap-production-vps.sh install-pr 63 "$MOCK_HEAD" 2>&1); then
+  echo 'FAIL: install accepted changed Doppler settings after build' >&2
+  exit 1
+fi
+[[ "$out" == *'Doppler configuration changed during image build'* ]]
+grep -q '^docker build ' "$log"
+if grep -Eq 'docker (network create|compose.*up -d db)|migrations-cli.js --apply' "$log"; then
+  echo 'FAIL: changed Doppler config allocated network or database' >&2
+  exit 1
+fi
+echo 'PASS: Doppler secret rotated after build -> no ingress network or database created'
