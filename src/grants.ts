@@ -11,6 +11,7 @@ export type GrantInput = {
 export interface GrantManagement {
   setGrant(ownerSub: string, actorClientId: string, projectId: string, grant: GrantInput): Promise<boolean>;
   revokeClient(ownerSub: string, clientId: string): Promise<number>;
+  setBrowserGrant?(ownerSub:string,projectId:string,clientId:string,enabled:boolean):Promise<boolean>;
 }
 
 export class PgGrantManagement extends PgInventory implements GrantManagement {
@@ -63,6 +64,61 @@ export class PgGrantManagement extends PgInventory implements GrantManagement {
       db.release();
     }
   }
+  /**
+   * Owner's browser-only consent grant. Must not re-enable a client whose
+   * OAuth consent predates the revocation cutoff; serialize with revokeClient.
+   * Never accepts a write/manufacturing mode or local project path.
+   */
+  async setBrowserGrant(owner:string,projectId:string,clientId:string,enabled:boolean):Promise<boolean>{
+    const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if(!this.builtInTokenStore||!owner||owner.length>256||!uuid.test(projectId)||
+      !clientId||clientId.length>1024||typeof enabled!=="boolean")return false;
+    const db=await this.pool.connect();
+    try{
+      await db.query("BEGIN");
+      await db.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1 || chr(31) || $2, 48296018))",
+        [owner,clientId]);
+      const project=await db.query(
+        "SELECT p.id FROM projects p JOIN devices d ON d.id=p.device_id AND d.owner_sub=p.owner_sub "+
+        "JOIN device_credentials k ON k.device_id=d.id AND k.owner_sub=d.owner_sub "+
+        "WHERE p.id=$1 AND p.owner_sub=$2 AND p.max_mode='readonly' AND p.enabled=true "+
+        "AND d.enabled=true AND k.revoked_at IS NULL FOR UPDATE OF p,d,k",
+        [projectId,owner]);
+      if(project.rowCount!==1){await db.query("ROLLBACK");return false;}
+      if(enabled){
+        const consent=await db.query<{created_at:Date}>(
+          'SELECT c."createdAt" AS created_at FROM "oauthConsent" c '+
+          'JOIN "oauthClient" o ON o."clientId"=c."clientId" '+
+          'WHERE c."userId"=$1 AND c."clientId"=$2 AND c."scopes" @> $3::jsonb '+
+          'AND o."disabled" IS DISTINCT FROM true ORDER BY c."createdAt" DESC LIMIT 1 '+
+          'FOR SHARE OF c,o',[owner,clientId,JSON.stringify(["projects:read"])]);
+        const created=consent.rows[0]?.created_at;
+        if(!created){await db.query("ROLLBACK");return false;}
+        const revoked=await db.query<{revoked_at:Date}>(
+          "SELECT revoked_at FROM client_token_cutoffs WHERE owner_sub=$1 AND client_id=$2 FOR SHARE",
+          [owner,clientId]);
+        if(revoked.rows[0]&&created.getTime()<=revoked.rows[0].revoked_at.getTime()){
+          await db.query("ROLLBACK");return false;
+        }
+      }
+      await db.query(
+        "INSERT INTO project_client_grants(project_id,owner_sub,client_id,enabled,max_mode) "+
+        "VALUES($1,$2,$3,$4,'readonly') ON CONFLICT(project_id,client_id) DO UPDATE SET "+
+        "enabled=excluded.enabled,max_mode='readonly' "+
+        "WHERE project_client_grants.owner_sub=excluded.owner_sub",
+        [projectId,owner,clientId,enabled]);
+      await db.query(
+        "INSERT INTO client_grant_audit(owner_sub,actor_client_id,project_id,operation) "+
+        "VALUES($1,$2,$3,'grant.set')",[owner,"owner-browser",projectId]);
+      await db.query("COMMIT");
+      return true;
+    }catch(error){
+      try{await db.query("ROLLBACK");}catch{/* original error */}
+      throw error;
+    }finally{db.release();}
+  }
+
   async setGrant(ownerSub: string, actorClientId: string, projectId: string, grant: GrantInput): Promise<boolean> {
     const db: PoolClient = await this.pool.connect();
     try {

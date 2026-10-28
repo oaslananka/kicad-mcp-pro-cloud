@@ -104,8 +104,8 @@ export class BoundConnectorConnections{
   async authorizeOutgoingSummary(socket:object,oauth:TrustedOAuthReadIdentity,
     projectId:string):Promise<boolean>{
     const e=socket&&this.sockets.get(socket);
-    if(!e||e.state!=="active"||!e.sessionId||!e.binding||
-      !oauth||oauth.ownerSub!==e.ownerSub||
+    if(e?.state!=="active"||!e.sessionId||!e.binding||
+      oauth?.ownerSub!==e.ownerSub||
       !this.admission.authorizeOutgoingSummary)return false;
     const authorized=await this.admission.authorizeOutgoingSummary(oauth,{
       deviceId:e.deviceId,sessionId:e.sessionId,connectionBinding:e.binding

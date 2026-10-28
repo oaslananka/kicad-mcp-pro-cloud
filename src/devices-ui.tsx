@@ -3,8 +3,8 @@ import type {ManagedDevice} from "./device-management.js";
 export function renderDevicesPage(
   devices:ReadonlyArray<ManagedDevice & {csrf:string;enableCsrf?:string;projectCsrf?:string}>,
   notice?:string,enrollmentAvailable=true,
-  projects:ReadonlyArray<{id:string;deviceId:string;alias:string;enabled:boolean}>=[],
-  ownerSub?:string
+  projects:ReadonlyArray<{id:string;deviceId:string;alias:string;enabled:boolean;grantCsrf?:string}>=[],
+  ownerSub?:string,clients:ReadonlyArray<string>=[]
 ):string {
   return renderPage({title:"Devices",kind:"devices",eyebrow:"Workspace / Devices",
     summary:"Device availability and access management for local KiCad integrations.",
@@ -37,7 +37,7 @@ export function renderDevicesPage(
                 <form action="/devices/projects/create" method="post">
                   <input type="hidden" name="device_id" value={d.id}/>
                   <input type="hidden" name="csrf" value={d.projectCsrf}/>
-                  <label>Project alias (no local paths)
+                  <label>Project alias (no local paths){" "}
                     <input name="alias" maxLength={64} required={true} autoComplete="off"/>
                   </label>
                   <button className="button secondary" type="submit">Register read-only project</button>
@@ -53,6 +53,18 @@ export function renderDevicesPage(
               <strong>{project.alias}</strong> — <code>{project.id}</code>
               <p>Device: {project.deviceId}; {project.enabled?"Read-only metadata registered":"Disabled"}.
                 Local folder must be selected separately on the device. Per-client access is denied until granted.</p>
+              {project.enabled&&project.grantCsrf&&clients.length>0?
+                <form method="post" action="/devices/projects/grant">
+                  <input type="hidden" name="project_id" value={project.id}/>
+                  <input type="hidden" name="csrf" value={project.grantCsrf}/>
+                  <label>AI client with existing OAuth consent
+                    <select name="client_id" required={true}>
+                      {clients.map(client=><option value={client} key={client}>{client}</option>)}
+                    </select>
+                  </label>
+                  <button name="enabled" value="true" type="submit">Allow read-only metadata</button>
+                  <button name="enabled" value="false" type="submit">Revoke this project's access</button>
+                </form>:null}
             </li>)}</ul></>:null}
           <div className="security-note">Revoked keys cannot authenticate, even if a device flag is later changed. No KiCad project files or paths are stored in Cloud.</div>
           {enrollmentAvailable?<div className="action-row"><a className="button secondary" href="/devices/pairing">Review device pairing →</a></div>:null}

@@ -3,6 +3,7 @@ import {makeSignature} from "better-auth/crypto";
 import type {BrowserIdentity} from "./browser.js";
 import type {PgDeviceManagement} from "./device-management.js";
 import {renderDevicesPage} from "./devices-ui.js";
+import type {GrantManagement} from "./grants.js";
 
 export type DeviceManagementPort=Pick<PgDeviceManagement,"list"|"revokeDevice"> &
   Partial<Pick<PgDeviceManagement,"enableDevice"|"createProject"|"listProjects">>;
@@ -22,9 +23,9 @@ function readCookie(req:Request,origin:string):string|null{
 }
 function reply(status:number,devices:Parameters<typeof renderDevicesPage>[0]=[],
   message?:string,stateCookie?:string,enrollmentAvailable=true,
-  projects:ReadonlyArray<{id:string;deviceId:string;alias:string;enabled:boolean}>=[],
-  ownerSub?:string):Response{
-  const response=new Response(renderDevicesPage(devices,message,enrollmentAvailable,projects,ownerSub),{status,headers:{
+  projects:ReadonlyArray<{id:string;deviceId:string;alias:string;enabled:boolean;grantCsrf?:string}>=[],
+  ownerSub?:string,clients:ReadonlyArray<string>=[]):Response{
+  const response=new Response(renderDevicesPage(devices,message,enrollmentAvailable,projects,ownerSub,clients),{status,headers:{
     "Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store",
     "Referrer-Policy":"no-referrer","X-Content-Type-Options":"nosniff",
     "Content-Security-Policy":"default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'"
@@ -68,7 +69,8 @@ async function checkCsrf(req:Request,origin:string,secret:string,
   return a.length===b.length&&timingSafeEqual(a,b);
 }
 async function list(req:Request,identity:BrowserIdentity,origin:string,
-  devices:DeviceManagementPort,enrollmentAvailable=true):Promise<Response>{
+  devices:DeviceManagementPort,enrollmentAvailable=true,
+  grants?:Pick<GrantManagement,"setBrowserGrant">):Promise<Response>{
   if(!identity.api||!identity.$context)return error(503);
   const who=userOf(await identity.api.getSession({headers:req.headers}));
   if(!who)return new Response(null,{status:303,headers:{"Location":"/sign-in","Cache-Control":"no-store"}});
@@ -93,8 +95,25 @@ async function list(req:Request,identity:BrowserIdentity,origin:string,
     "Device key revoked; its sessions and associated project/client permissions were disabled.":undefined;
   const projects=enrollmentAvailable&&devices.listProjects?
     await devices.listProjects(who.user):[];
+  let clients:string[]=[];
+  if(enrollmentAvailable&&grants?.setBrowserGrant&&identity.api.getOAuthConsents){
+    try{
+      const consents=await identity.api.getOAuthConsents({headers:req.headers});
+      if(Array.isArray(consents)){
+        clients=[...new Set(consents.filter(c=>c.userId===who.user&&
+          typeof c.clientId==="string"&&c.clientId.length<=1024&&
+          Array.isArray(c.scopes)&&c.scopes.includes("projects:read"))
+          .map(c=>c.clientId))].slice(0,100);
+      }
+    }catch{return error(503);}
+  }
+  const scoped=await Promise.all(projects.map(async project=>({...project,
+    grantCsrf:grants?.setBrowserGrant?
+      await csrf(secret,who.user,who.session,project.id,stamp,nonce,"project-browser-grant-v1"):
+      undefined
+  })));
   return reply(200,rows,note,cookie(stamp+"."+nonce,origin,300),
-    enrollmentAvailable,projects,who.user);
+    enrollmentAvailable,scoped,who.user,clients);
 }
 async function revoke(req:Request,identity:BrowserIdentity,origin:string,
   devices:DeviceManagementPort):Promise<Response>{
@@ -158,18 +177,50 @@ async function activate(req:Request,identity:BrowserIdentity,origin:string,
   }});
 }
 
+async function ownerGrant(req:Request,identity:BrowserIdentity,origin:string,
+  grants:Pick<GrantManagement,"setBrowserGrant">):Promise<Response>{
+  if(!identity.api||!identity.$context||!grants.setBrowserGrant)return error(503);
+  if(req.headers.get("origin")!==origin)return error(403);
+  if(req.headers.get("content-type")?.split(";")[0].trim()!=="application/x-www-form-urlencoded")
+    return error(415);
+  const raw=await req.text();
+  if(raw.length>2048)return error(413);
+  const fields=new URLSearchParams(raw);
+  const names=["project_id","client_id","enabled","csrf"];
+  if([...fields.keys()].length!==names.length||
+    names.some(name=>fields.getAll(name).length!==1))return error(400);
+  const project=fields.get("project_id")??"",client=fields.get("client_id")??"";
+  const enabled=fields.get("enabled"),proof=fields.get("csrf")??"";
+  if(!DEVICE_ID.test(project)||!client||client.length>1024||
+    (enabled!=="true"&&enabled!=="false"))return error(400);
+  const who=userOf(await identity.api.getSession({headers:req.headers}));
+  if(!who)return error(401);
+  const {secret}=await identity.$context;
+  if(!await checkCsrf(req,origin,secret,who,project,proof,"project-browser-grant-v1"))
+    return error(403);
+  let updated=false;
+  try{updated=await grants.setBrowserGrant(who.user,project,client,enabled==="true");}
+  catch{return error(503);}
+  if(!updated)return error(404);
+  return new Response(null,{status:303,headers:{Location:"/devices",
+    "Cache-Control":"no-store","Set-Cookie":cookie("",origin,0)}});
+}
+
 /** Authenticated browser-only management, never usable in external auth mode. */
 export async function devicesResponse(req:Request,identity:BrowserIdentity,origin:string,
-  devices?:DeviceManagementPort,enrollmentAvailable=true):Promise<Response|null>{
+  devices?:DeviceManagementPort,enrollmentAvailable=true,
+  grants?:Pick<GrantManagement,"setBrowserGrant">):Promise<Response|null>{
   const path=new URL(req.url).pathname;
-  if(!["/devices","/devices/revoke","/devices/enable","/devices/projects/create"].includes(path))
+  if(!["/devices","/devices/revoke","/devices/enable","/devices/projects/create",
+    "/devices/projects/grant"].includes(path))
     return null;
   if(!devices)return error(503);
-  if(path==="/devices"&&req.method==="GET")return list(req,identity,origin,devices,enrollmentAvailable);
+  if(path==="/devices"&&req.method==="GET")return list(req,identity,origin,devices,enrollmentAvailable,grants);
   if(path==="/devices/revoke"&&req.method==="POST")return revoke(req,identity,origin,devices);
   if(enrollmentAvailable && req.method==="POST"){
     if(path==="/devices/enable")return activate(req,identity,origin,devices,"device-enable-v1");
     if(path==="/devices/projects/create")return activate(req,identity,origin,devices,"project-create-v1");
+    if(path==="/devices/projects/grant"&&grants)return ownerGrant(req,identity,origin,grants);
   }
   return error(405);
 }

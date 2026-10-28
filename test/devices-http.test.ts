@@ -124,11 +124,11 @@ test("owner device activation and read-only project creation are disabled by def
     assert.ok(csrf&&wrong);
     const headers={"Content-Type":"application/x-www-form-urlencoded",
       Origin:config.publicOrigin,Cookie:cookie};
-    const send=(path:string,body:URLSearchParams)=>fetch(enabled.origin+path,{
+    const send=(body:URLSearchParams)=>fetch(enabled.origin+"/devices/enable",{
       method:"POST",headers,body,redirect:"manual"});
-    assert.equal((await send("/devices/enable",new URLSearchParams({device_id:id,csrf:wrong}))).status,403);
+    assert.equal((await send(new URLSearchParams({device_id:id,csrf:wrong}))).status,403);
     assert.equal(deviceEnabled,false);
-    assert.equal((await send("/devices/enable",new URLSearchParams({device_id:id,csrf}))).status,303);
+    assert.equal((await send(new URLSearchParams({device_id:id,csrf}))).status,303);
     assert.equal(deviceEnabled,true);
     const updated=await fetch(enabled.origin+"/devices");
     const projectHtml=await updated.text();
@@ -147,4 +147,60 @@ test("owner device activation and read-only project creation are disabled by def
     assert.match(refreshed,/77777777-7777-4777-8777-777777777777/);
     assert.doesNotMatch(refreshed,/local file path/i);
   }finally{await enabled.close();}
+});
+
+test("owner approves only an OAuth-consented AI client's read-only project grant",async()=>{
+  deviceEnabled=true;
+  registeredProjects.splice(0,registeredProjects.length,{
+    id:"77777777-7777-4777-8777-777777777777",deviceId:id,alias:"Fixture",enabled:true
+  });
+  const actor={...identity,api:{...identity.api,
+    getOAuthConsents:async()=>[
+      {id:"approved",userId:"owner-1",clientId:"ai-fixture",scopes:["projects:read"]},
+      {id:"foreign",userId:"owner-2",clientId:"other-owner",scopes:["projects:read"]},
+      {id:"other-scope",userId:"owner-1",clientId:"not-allowed",scopes:["openid"]}
+    ]}} as unknown as BrowserIdentity;
+  const requests:Array<{owner:string;project:string;client:string;enabled:boolean}>=[];
+  const grants={
+    setGrant:async()=>false,
+    revokeClient:async()=>0,
+    setBrowserGrant:async(owner:string,project:string,client:string,enabled:boolean)=>{
+      requests.push({owner,project,client,enabled});
+      return owner==="owner-1"&&client==="ai-fixture";
+    }
+  };
+  const web=await startServer(createHttpServer(config,inventory,async()=>{
+    throw Error("unused");
+  },grants,actor,devices,undefined,{} as never));
+  try{
+    const page=await fetch(web.origin+"/devices");
+    const html=await page.text();
+    assert.match(html,/AI client with existing OAuth consent/);
+    assert.match(html,/ai-fixture/);
+    assert.doesNotMatch(html,/other-owner|not-allowed/);
+    const token=/action="\/devices\/projects\/grant"[\s\S]*?name="csrf" value="([^"]+)"/.exec(html)?.[1]??"";
+    assert.ok(token);
+    const cookie=(page.headers.get("set-cookie")??"").split(";")[0];
+    const headers={Origin:config.publicOrigin,
+      "Content-Type":"application/x-www-form-urlencoded",Cookie:cookie};
+    const data=new URLSearchParams({project_id:registeredProjects[0].id,
+      client_id:"ai-fixture",enabled:"true",csrf:token});
+    const bad=await fetch(web.origin+"/devices/projects/grant",{
+      method:"POST",headers:{...headers,Origin:"https://bad.example"},
+      body:data,redirect:"manual"
+    });
+    assert.equal(bad.status,403);
+    assert.equal(requests.length,0);
+    const approved=await fetch(web.origin+"/devices/projects/grant",{
+      method:"POST",headers,body:data,redirect:"manual"
+    });
+    assert.equal(approved.status,303);
+    assert.deepEqual(requests,[{owner:"owner-1",project:registeredProjects[0].id,
+      client:"ai-fixture",enabled:true}]);
+    data.set("enabled","false");
+    assert.equal((await fetch(web.origin+"/devices/projects/grant",{
+      method:"POST",headers,body:data,redirect:"manual"
+    })).status,303);
+    assert.equal(requests[1].enabled,false);
+  }finally{await web.close();}
 });

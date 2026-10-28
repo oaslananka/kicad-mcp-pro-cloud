@@ -131,7 +131,7 @@ export class PgConnectorReadGate{
         "FROM connector_sessions WHERE id=$1 AND device_id=$2 AND owner_sub=$3 FOR UPDATE",
         [connection.sessionId,connection.deviceId,oauth.ownerSub]);
       const session=result.rows[0];
-      if(!session||session.state!=="active"||
+      if(session?.state!=="active"||
         !isBindingMatch(connection.connectionBinding,session.connection_digest)){
         return {kind:"unavailable"};
       }
