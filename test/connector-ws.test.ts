@@ -173,9 +173,9 @@ test("invalid device signature never starts an authenticated connector session",
   });
 });
 
-test("authenticated Cloud socket rejects in-flight client, grant and device revocation",
+test("authenticated Cloud socket rejects revocation and expired reads after wall-clock rollback",
   {skip:!url,timeout:90_000},async()=>{
-  for(const revocation of ["none","grant","device","token"] as const){
+  for(const revocation of ["none","grant","device","token","clock_rollback"] as const){
     await inIsolatedDatabase(url!,migrations,async db=>{
       const owner="summary-owner",clientId="approved-client";
       const keys=generateKeyPairSync("ed25519");
@@ -196,6 +196,7 @@ test("authenticated Cloud socket rejects in-flight client, grant and device revo
         "VALUES($1,$2,$3,true,'readonly')",[project,owner,clientId]);
       const {server,port,attached}=await startFixtureServer(db);
       let ws:WebSocket|undefined;
+      const actualDateNow=Date.now;
       try{
         ws=await connect("ws://127.0.0.1:"+port+"/api/v1/connector/ws");
         const challenge=await send(ws,{kind:"device.hello",version:1,
@@ -229,6 +230,11 @@ test("authenticated Cloud socket rejects in-flight client, grant and device revo
         }else if(revocation==="token"){
           await db.query("INSERT INTO client_token_cutoffs(owner_sub,client_id,revoked_at) "+
             "VALUES($1,$2,clock_timestamp())",[owner,clientId]);
+        }else if(revocation==="clock_rollback"){
+          // The wire deadline is 8 s. A host wall-clock rollback must not
+          // revive a read that took longer than the operator's grant.
+          await new Promise(resolve=>setTimeout(resolve,8_200));
+          Date.now=()=>actualDateNow()-30_000;
         }
         const reply={kind:"connector.local_read_preview",version:1,
           requestId:request.requestId,projectId:project,operation:"project_summary",
@@ -248,6 +254,7 @@ test("authenticated Cloud socket rejects in-flight client, grant and device revo
           assert.equal(receipt.requestId,request.requestId);
         }
       }finally{
+        Date.now=actualDateNow;
         ws?.terminate();
         await attached.close();
         await new Promise<void>(resolve=>server.close(()=>resolve()));

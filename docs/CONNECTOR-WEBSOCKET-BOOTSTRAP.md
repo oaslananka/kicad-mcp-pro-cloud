@@ -67,6 +67,20 @@ When the local device replies, the Cloud transport checks the exact
 request/project identity and deadline, then asynchronously revalidates the
 owner/OAuth-client project grant and active device binding in PostgreSQL.
 
+**Wall-clock rollback resistance:** Unix milliseconds remain the wire
+request deadline and are still checked. The server independently tracks the
+same read window and five-minute session cap with the process monotonic
+clock, including rechecking after async grant authorization. Per-process
+rate buckets also use elapsed monotonic time, so an OS wall-clock change
+cannot reset the window early. The PostgreSQL-backed WebSocket regression
+first reproduced the bug: after eight seconds of real elapsed time, setting
+the host wall clock back 30 seconds made the old code return project-presence
+metadata. The corrected implementation returns no result or ACK and closes
+with policy 1008. Clock manipulation in this fixture is limited to the
+disposable test process, not the machine clock. This does not provide a
+distributed ingress rate limiter, independent owner approval, or real-user
+OAuth acceptance.
+
 **A passing database query is not an extension of the original deadline.**
 If the query finishes after the original request deadline or after the
 bounded device session expires, the server discards the result, closes

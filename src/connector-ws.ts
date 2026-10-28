@@ -1,5 +1,6 @@
 import {type IncomingMessage, type Server} from "node:http";
 import {randomUUID} from "node:crypto";
+import {performance} from "node:perf_hooks";
 import type {TrustedOAuthReadIdentity} from "./connector-read-gate.js";
 import type {Socket} from "node:net";
 import {WebSocket,WebSocketServer} from "ws";
@@ -15,7 +16,7 @@ export type SummaryReadResult={
   projectId:string;operation:"project_summary";
   files:{projectPresent:boolean;boardPresent:boolean;schematicPresent:boolean};
 };
-type PendingRead={requestId:string;projectId:string;deadline:number;
+type PendingRead={requestId:string;projectId:string;deadline:number;monotonicDeadline:number;
   resolve:(value:SummaryReadResult|null)=>void;timer:NodeJS.Timeout};
 type Entry={
   phase:State; owner:string; device:string; challenge:string; nonce:string;
@@ -102,7 +103,7 @@ export function attachConnectorWebSocket(
 
   function allowWindow(buckets:Map<string,{start:number,count:number}>,
     id:string,max:number):boolean{
-    const now=Date.now();
+    const now=performance.now();
     const prior=buckets.get(id);
     if(!prior||now-prior.start>=MINUTE){
       buckets.set(id,{start:now,count:1});return true;
@@ -201,7 +202,7 @@ export function attachConnectorWebSocket(
               await options.connections.disconnect(ws);return;
             }
             entry.phase="session_challenge";
-            entry.sessionDeadline=Date.now()+MAX_SESSION;
+            entry.sessionDeadline=performance.now()+MAX_SESSION;
             expire(Math.min(PROOF_TIMEOUT,Math.max(1,session.expiresAtMs-Date.now())));
             send({kind:"connector.session_challenge",version:1,
               sessionId:session.sessionId,challengeId:session.challengeId,
@@ -217,7 +218,7 @@ export function attachConnectorWebSocket(
             }
             if(closed()||ws.readyState!==WebSocket.OPEN)return;
             entry.phase="ready";
-            expire(Math.max(1,(entry.sessionDeadline??0)-Date.now()));
+            expire(Math.max(1,(entry.sessionDeadline??0)-performance.now()));
             send({kind:"connector.ready",version:1});
             readyDevices.set(socketKey(entry.owner,entry.device),{socket:ws,entry});
             return;
@@ -233,6 +234,7 @@ export function attachConnectorWebSocket(
             // a stalled query can hold the HTTP relay promise indefinitely.
             const decoded=readResult.safeParse(raw);
             if(!decoded.success||Date.now()>=pending.deadline||
+               performance.now()>=pending.monotonicDeadline||
                decoded.data.result.requestId!==pending.requestId||
                decoded.data.result.projectId!==pending.projectId){
               entry.validating=undefined;
@@ -250,7 +252,8 @@ export function attachConnectorWebSocket(
             // deadline or the device session lease.
             if(!allowed||closed()||ws.readyState!==WebSocket.OPEN||
                Date.now()>=pending.deadline||
-               Date.now()>=(entry.sessionDeadline??0)){
+               performance.now()>=pending.monotonicDeadline||
+               performance.now()>=(entry.sessionDeadline??0)){
               pending.resolve(null);fail();return;
             }
             send({kind:"connector.read_ack",version:1,sequence:1,
@@ -301,7 +304,7 @@ export function attachConnectorWebSocket(
   };
   httpServer.on("upgrade",upgrade);
   const heartbeat=setInterval(()=>{
-    const now=Date.now();
+    const now=performance.now();
     for(const ws of sockets){
       // ping/pong checks transport liveness, NOT extension of DB lease.
       const e=(ws as WebSocket & {isAlive?:boolean});
@@ -326,7 +329,7 @@ export function attachConnectorWebSocket(
     const {socket,entry}=active;
     if(entry.phase!=="ready"||entry.readSent||entry.awaiting||
       socket.readyState!==WebSocket.OPEN||
-      (entry.sessionDeadline??0)-Date.now()<10_000)return null;
+      (entry.sessionDeadline??0)-performance.now()<10_000)return null;
     entry.readSent=true; // Reserve before any async authorization awaits.
     let preflightTimer:ReturnType<typeof setTimeout>|undefined;
     let preflightTimedOut=false;
@@ -358,7 +361,7 @@ export function attachConnectorWebSocket(
     }
     if(preflightTimedOut){reject(socket);return null;}
     if(!allowed||entry.phase!=="ready"||socket.readyState!==WebSocket.OPEN||
-      (entry.sessionDeadline??0)-Date.now()<10_000)return null;
+      (entry.sessionDeadline??0)-performance.now()<10_000)return null;
     const requestId=randomUUID();
     return new Promise<SummaryReadResult|null>(resolve=>{
       const timer=setTimeout(()=>{
@@ -367,8 +370,11 @@ export function attachConnectorWebSocket(
         resolve(null);reject(socket);
       },12_000);
       timer.unref();
+      // Wall milliseconds remain in the wire frame; local authorization cannot
+      // be extended by changing the host system clock.
       const deadline=Date.now()+8_000;
-      const pending:PendingRead={requestId,projectId,deadline,resolve,timer};
+      const monotonicDeadline=performance.now()+8_000;
+      const pending:PendingRead={requestId,projectId,deadline,monotonicDeadline,resolve,timer};
       waitingOAuth.set(pending,oauth);
       entry.awaiting=pending;
       try{socket.send(JSON.stringify({
