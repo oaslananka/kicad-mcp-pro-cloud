@@ -200,6 +200,22 @@ releases the wait. A consumed owner decision cannot be retried on the same
 session; metadata also stays subject to the existing post-read OAuth and grant
 checks. The connector is deliberately one-shot.
 
+**One-use receipt persistence is now implemented but NOT connected:**
+`db/013_owner_read_approvals.pgsql` and
+`src/owner-read-approval-ledger.ts` persist only an exact owner/client,
+device/project/origin, `project_summary`, request UUID and expiry. The consumer
+uses one PostgreSQL atomic conditional update and denies missing, mismatched,
+expired, raced or reused receipts. It has **no receipt issuance API, owner
+signature verifier, browser route, user-verification credentials, or configured
+production binding**. Only a separately trusted owner authority may be allowed
+to insert records in a future integration. Current production Cloud does not
+instantiate this ledger or wire it to the WebSocket; adding a database table
+alone does not authorize any read. A synthetic isolated PostgreSQL test seeds
+rows directly, verifies 12-way racing consumes exactly once, and proves field
+mismatch and expiry denial. The future owner authority must authenticate user
+presence and protect the database's issuance privilege independently; a
+same-UID agent with database write access is NOT trusted.
+
 **No real owner verification port, public enrollment, credential or user
 presence authenticator has been implemented.** Only synthetic test fixtures
 inject a port that returns true to exercise the existing transport/grant

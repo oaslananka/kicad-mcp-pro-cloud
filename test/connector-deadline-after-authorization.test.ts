@@ -91,7 +91,7 @@ test(scenario==="missing-owner-consent" ?
     ...(scenario==="missing-owner-consent"?{}:{
       ownerConsent:{consume:async(scope:{
         oauth:{ownerSub:string;clientId:string};deviceId:string;projectId:string;
-        requestId:string;operation:string;expiresAtUnixMs:number;
+        requestId:string;origin:string;operation:string;expiresAtUnixMs:number;
       })=>{
         // Synthetic port. Real production has no owner verifier configured.
         assert.equal(scope.oauth.ownerSub,owner);
@@ -99,6 +99,7 @@ test(scenario==="missing-owner-consent" ?
         assert.equal(scope.deviceId,device);
         assert.equal(scope.projectId,project);
         assert.equal(scope.operation,"project_summary");
+        assert.equal(scope.origin,"http://127.0.0.1:"+port);
         assert.match(scope.requestId,/^[0-9a-f-]{36}$/);
         approvedRequestId=scope.requestId;
         assert.ok(scope.expiresAtUnixMs>Date.now());

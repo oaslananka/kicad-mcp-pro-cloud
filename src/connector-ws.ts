@@ -20,7 +20,7 @@ export type DeviceProofPort=Pick<PgDeviceHandshakes,"issue"|"verify"|"cancel">;
 export type OwnerReadConsentPort={
   consume:(scope:Readonly<{
     oauth:TrustedOAuthReadIdentity;deviceId:string;projectId:string;
-    requestId:string;operation:"project_summary";expiresAtUnixMs:number;
+    requestId:string;origin:string;operation:"project_summary";expiresAtUnixMs:number;
   }>)=>Promise<boolean>;
 };
 type State="new"|"device_challenge"|"session_challenge"|"ready"|"closed";
@@ -362,7 +362,8 @@ export function attachConnectorWebSocket(
     try{
       consented=await Promise.race([
         options.ownerConsent.consume({oauth,deviceId,projectId,requestId,
-          operation:"project_summary",expiresAtUnixMs:ownerExpiresAtUnixMs}),
+          origin:options.publicOrigin,operation:"project_summary",
+          expiresAtUnixMs:ownerExpiresAtUnixMs}),
         new Promise<boolean>(resolve=>{
           consentTimer=setTimeout(()=>{consentTimedOut=true;resolve(false);},8_000);
           consentTimer.unref();
