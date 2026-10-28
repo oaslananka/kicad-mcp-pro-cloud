@@ -294,6 +294,12 @@ async function handleRequest(
         if(!currentProject||currentProject.deviceId!==fields.deviceId){
           deny(res,403,"forbidden");return;
         }
+        // This last grant lookup is also asynchronous. The access token can
+        // expire while it runs, after the prior post-relay JWT verification.
+        // Do not release any project-presence bytes without a fresh token
+        // check immediately before constructing the HTTP response.
+        try{await verify(matched[1]);}
+        catch{deny(res,403,"forbidden");return;}
         json(res,200,result);return;
       }
       if (path !== "/mcp") {

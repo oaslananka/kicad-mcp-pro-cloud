@@ -326,6 +326,53 @@ test("Cloud HTTP read refuses grant revocation after relay result but before rep
   }
 });
 
+test("Cloud HTTP read denies token expiry during the final awaited project lookup",async()=>{
+  const path="/api/v1/connector/project-summary";
+  let expired=false;
+  let verifications=0;
+  let lookups=0;
+  const expiryVerifier:Verifier=async token=>{
+    verifications++;
+    if(expired)throw Error("synthetic access token expired");
+    return verify(token);
+  };
+  const delayedInventory:Inventory={
+    ...inventory,
+    async getProject(owner,clientId,projectId){
+      lookups++;
+      const found=await inventory.getProject(owner,clientId,projectId);
+      // Simulate a JWT expiry exactly while the final project/grant
+      // lookup was awaited, after the first post-relay JWT verification.
+      expired=true;
+      return found;
+    }
+  };
+  const relay={
+    async requestSummary(_actor:unknown,_device:string,projectId:string){
+      return {kind:"connector.local_read_preview" as const,version:1 as const,
+        requestId:id,projectId,operation:"project_summary" as const,
+        files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
+    }
+  };
+  const proxy=createHttpServer(config,delayedInventory,expiryVerifier,{summaryRelay:()=>relay});
+  await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
+  try{
+    const port=(proxy.address() as AddressInfo).port;
+    const result=await fetch("http://127.0.0.1:"+port+path,{
+      method:"POST",headers:headers(),
+      body:JSON.stringify({deviceId:mockProject.deviceId,projectId:id})
+    });
+    assert.equal(result.status,403,
+      "Token expired during final grant lookup must never release project presence");
+    assert.deepEqual(await result.json(),{error:"forbidden"});
+    assert.equal(lookups,1);
+    assert.equal(verifications,3,
+      "HTTP must verify JWT immediately before delivering the final metadata");
+  }finally{
+    await new Promise<void>(resolve=>proxy.close(()=>resolve()));
+  }
+});
+
 test("Cloud read route is absent without connector and validates OAuth and payload when attached",async()=>{
   const path="/api/v1/connector/project-summary";
   const validBody=JSON.stringify({deviceId:mockProject.deviceId,projectId:id});

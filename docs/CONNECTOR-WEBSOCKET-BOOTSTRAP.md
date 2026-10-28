@@ -76,6 +76,18 @@ the WebSocket with policy code 1008, and sends **no**
 independently rechecks JWT expiry, token cutoff and the current
 project/device grant before sending an HTTP result.
 
+**HTTP final grant-lookup expiry:** The HTTP endpoint verifies the OAuth
+JWT after the one-shot WebSocket relay returns, then awaits token-cutoff
+and project/device grant checks. The **last** project grant lookup can
+itself outlive the token expiry, making the earlier re-verification
+stale. Before releasing project-presence metadata, HTTP now performs a
+final JWT verification **after** that awaited project lookup. A
+RED-before-GREEN localhost HTTP regression uses a verifier that becomes
+invalid while `getProject` is awaited; the old response was HTTP 200
+with metadata, the corrected response is 403 with no presence fields.
+This final check narrows the read-to-response race but does not claim
+atomicity across HTTP serialization, PostgreSQL and external revocation.
+
 The regression `test/connector-deadline-after-authorization.test.ts`
 simulates a previously authorized, real localhost WebSocket read whose
 database grant check completes after the signed deadline: it must return
