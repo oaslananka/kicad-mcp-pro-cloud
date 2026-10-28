@@ -40,14 +40,15 @@ registration or DNS cutover has been independently accepted.
 | `OAUTH_JWKS_URL` | `PUBLIC_ORIGIN` + `/api/auth/jwks` |
 | `OAUTH_AUDIENCE` | `PUBLIC_ORIGIN` + `/mcp` |
 | `KICAD_DB_PASSWORD` | Fresh production PostgreSQL password |
-| `AUTH_MODE` | `builtin` for validated GitHub-only first launch |
-| `BETTER_AUTH_SECRET` | Independent strong random auth root secret |
+| `AUTH_MODE` | Exactly `builtin` for new VPS first launch (not `external`) |
+| `BETTER_AUTH_SECRET` | Independent cryptographically random auth root secret, at least 32 characters |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | New domain's GitHub OAuth app credentials |
 | `KICAD_TUNNEL_NETWORK` | Dedicated Docker bridge name for this VPS, e.g. `kicad_private_ingress` |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Token for a **dedicated, remotely managed** Cloudflare Tunnel |
 
 Optional when explicitly configured: `GOOGLE_CLIENT_ID`,
-`GOOGLE_CLIENT_SECRET`, `MANAGEMENT_CLIENT_ID`, `ALLOWED_ORIGINS` and backup
+`GOOGLE_CLIENT_SECRET`, `MANAGEMENT_CLIENT_ID`, `ALLOWED_ORIGINS`
+(comma-separated exact HTTPS origins; invalid entries fail preflight) and backup
 age keys. When both Google credentials are present, production smoke checks
 that the Google login option is displayed; no credential value is logged. Provider pairs must be complete; OAuth providers need their own
 registered callback URLs for the **new** domain. `PAIRING_DEVICE_API_ENABLED`

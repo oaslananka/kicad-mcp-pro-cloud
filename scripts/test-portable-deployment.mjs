@@ -10,7 +10,7 @@ const base={
   OAUTH_JWKS_URL:"https://pcb.example.test/api/auth/jwks",
   OAUTH_AUDIENCE:"https://pcb.example.test/mcp",
   KICAD_DB_PASSWORD:"not-a-secret-test-fixture",
-  AUTH_MODE:"builtin",BETTER_AUTH_SECRET:"not-a-secret-test-fixture",
+  AUTH_MODE:"builtin",BETTER_AUTH_SECRET:"synthetic-auth-fixture-value-at-least-32-characters",
   GITHUB_CLIENT_ID:"sample-id",GITHUB_CLIENT_SECRET:"not-a-secret-test-fixture",
   KICAD_TUNNEL_NETWORK:"pcb_dedicated_ingress",
   CLOUDFLARE_TUNNEL_TOKEN:"not-a-secret-test-fixture"};
@@ -32,7 +32,15 @@ test("fail closed on unsafe or inconsistent deployment config",()=>{
     {PUBLIC_ORIGIN:"https://user:pass@pcb.example.test"},
     {OAUTH_AUDIENCE:"https://another.example/mcp"},
     {OAUTH_ISSUER:"https://another.example/api/auth"},
+    {AUTH_MODE:"external"},
+    {AUTH_MODE:""},
+    {BETTER_AUTH_SECRET:"short"},
+    {BETTER_AUTH_SECRET:"x".repeat(31)},
     {KICAD_DB_PASSWORD:""},
+    {ALLOWED_ORIGINS:"http://insecure.example.test"},
+    {ALLOWED_ORIGINS:"https://ok.example.test/prefix"},
+    {ALLOWED_ORIGINS:"https://username:pass@ok.example.test"},
+    {ALLOWED_ORIGINS:"not-an-origin"},
     {GITHUB_CLIENT_SECRET:""},
     {GOOGLE_CLIENT_ID:"partial-google"},
     {KICAD_TUNNEL_NETWORK:"bad network/name"},
@@ -43,6 +51,13 @@ test("fail closed on unsafe or inconsistent deployment config",()=>{
     assert.notEqual(out.status,0,JSON.stringify(Object.keys(delta)));
     assert.doesNotMatch(out.stderr,/not-a-secret-test-fixture/);
   }
+});
+test("new VPS accepts exact 32-character auth secret and HTTPS allowlist",()=>{
+  const result=cli("validate",{
+    BETTER_AUTH_SECRET:"x".repeat(32),
+    ALLOWED_ORIGINS:"https://owner.example.test, https://client.example.test"
+  });
+  assert.equal(result.status,0,result.stderr);
 });
 test("production compose accepts configurable external network and forwards management config",()=>{
   const output=execFileSync("/usr/bin/docker",["compose","-f","infra/compose.production.yml","config","--format","json"],

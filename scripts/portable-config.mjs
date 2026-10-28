@@ -27,20 +27,38 @@ else if(kind==="google"){
   process.stdout.write(String(google)+"\n");
 }else if(kind==="validate"){
   checkProviderPairs();
-  const auth=process.env.AUTH_MODE??"external";
-  if(!["external","builtin"].includes(auth))throw new Error("INVALID_AUTH_MODE");
+  // The fresh-VPS contract serves a first-party OAuth login, not an
+  // externally provisioned identity system. Legacy production can continue
+  // using AUTH_MODE=external; only this fresh-install validator is strict.
+  const auth=process.env.AUTH_MODE??"";
+  if(auth!=="builtin")throw new Error("NEW_VPS_REQUIRES_BUILTIN_AUTH");
   const issuer=process.env.OAUTH_ISSUER??"",jwks=process.env.OAUTH_JWKS_URL??"";
   const audience=process.env.OAUTH_AUDIENCE??"";
   if(audience!==origin+"/mcp")throw new Error("OAUTH_AUDIENCE_MISMATCH");
-  if(auth==="builtin"&&(issuer!==origin+"/api/auth"||jwks!==origin+"/api/auth/jwks"))
+  if(issuer!==origin+"/api/auth"||jwks!==origin+"/api/auth/jwks")
     throw new Error("BUILTIN_OAUTH_ORIGIN_MISMATCH");
   for(const value of [issuer,jwks]){
     let url;try{url=new URL(value);}catch{throw new Error("INVALID_OAUTH_URL");}
     if(url.protocol!=="https:"||url.username||url.password)throw new Error("INVALID_OAUTH_URL");
   }
   if(!(process.env.KICAD_DB_PASSWORD??""))throw new Error("KICAD_DB_PASSWORD_REQUIRED");
-  if(auth==="builtin"&&(!(process.env.BETTER_AUTH_SECRET??"")||!github))
-    throw new Error("BUILTIN_GITHUB_OAUTH_CREDENTIALS_REQUIRED");
+  // Better Auth itself refuses secrets shorter than 32 characters. Catch
+  // mismatched Doppler configs before any database or network is allocated.
+  if((process.env.BETTER_AUTH_SECRET??"").length<32)
+    throw new Error("BETTER_AUTH_SECRET_TOO_SHORT");
+  if(!github)throw new Error("BUILTIN_GITHUB_OAUTH_CREDENTIALS_REQUIRED");
+  // Mirror the application's HTTPS-only origin allowlist validation. This
+  // prevents a malformed optional Doppler value from crashing the new app
+  // only after the database and ingress have already been provisioned.
+  for(const entry of (process.env.ALLOWED_ORIGINS??"").split(",")){
+    const value=entry.trim();
+    if(!value)continue;
+    let allowed;
+    try{allowed=new URL(value);}catch{throw new Error("INVALID_ALLOWED_ORIGINS");}
+    if(allowed.protocol!=="https:"||allowed.origin!==value||
+       allowed.username||allowed.password)
+      throw new Error("INVALID_ALLOWED_ORIGINS");
+  }
   if(process.env.PAIRING_DEVICE_API_ENABLED==="true"||process.env.CONNECTOR_WS_ENABLED==="true")
     throw new Error("DEVICE_ROLLOUT_REQUIRES_SEPARATE_SECURITY_ACCEPTANCE");
   process.stdout.write("Portable runtime configuration valid (secrets not printed)\n");

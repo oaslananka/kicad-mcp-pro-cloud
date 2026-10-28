@@ -115,7 +115,7 @@ export OAUTH_ISSUER="$PUBLIC_ORIGIN/api/auth"
 export OAUTH_JWKS_URL="$PUBLIC_ORIGIN/api/auth/jwks"
 export OAUTH_AUDIENCE="$PUBLIC_ORIGIN/mcp"
 export KICAD_DB_PASSWORD='synthetic-test-password'
-export AUTH_MODE='builtin' BETTER_AUTH_SECRET='synthetic-test-secret'
+export AUTH_MODE='builtin' BETTER_AUTH_SECRET='synthetic-auth-fixture-value-at-least-32-characters'
 export GITHUB_CLIENT_ID='test-id' GITHUB_CLIENT_SECRET='synthetic-test-client-secret'
 export KICAD_TUNNEL_NETWORK='pcb_dedicated_ingress'
 export CLOUDFLARE_TUNNEL_TOKEN='synthetic-test-tunnel-token'
