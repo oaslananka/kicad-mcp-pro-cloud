@@ -3,7 +3,8 @@ import type {PgConnectorReadGate,ReadGateResult,TrustedOAuthReadIdentity}
   from "./connector-read-gate.js";
 
 export type DeviceSessionPort=Pick<PgConnectorSessions,"issue"|"activate"|"close">;
-export type ReadAdmissionPort=Pick<PgConnectorReadGate,"verifySignedRead">;
+export type ReadAdmissionPort=Pick<PgConnectorReadGate,"verifySignedRead"> &
+  Partial<Pick<PgConnectorReadGate,"authorizeOutgoingSummary">>;
 export type AuthenticatedDevice={readonly ownerSub:string;readonly deviceId:string};
 export type BoundBegin=
   |{kind:"issued";sessionId:string;challengeId:string;nonce:string;
@@ -97,6 +98,19 @@ export class BoundConnectorConnections{
       return {kind:"unavailable"};
     }
     return decision;
+  }
+
+  /** Server-owned socket identity; fail closed without a database gate. */
+  async authorizeOutgoingSummary(socket:object,oauth:TrustedOAuthReadIdentity,
+    projectId:string):Promise<boolean>{
+    const e=socket&&this.sockets.get(socket);
+    if(!e||e.state!=="active"||!e.sessionId||!e.binding||
+      !oauth||oauth.ownerSub!==e.ownerSub||
+      !this.admission.authorizeOutgoingSummary)return false;
+    const authorized=await this.admission.authorizeOutgoingSummary(oauth,{
+      deviceId:e.deviceId,sessionId:e.sessionId,connectionBinding:e.binding
+    },projectId);
+    return authorized&&this.sockets.get(socket)===e&&e.state==="active";
   }
 
   /** Disconnect is idempotent and fences the in-process socket immediately. */

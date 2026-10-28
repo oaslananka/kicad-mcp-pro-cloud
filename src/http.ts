@@ -17,6 +17,12 @@ import type {RequestSourceResolver} from "./trusted-ingress.js";
 import { oauthProviderResponse } from "./oauth-error.js";
 import { renderLanding } from "./browser-ui.js";
 import { uiCss } from "./ui-styles.js";
+import type {TrustedOAuthReadIdentity} from "./connector-read-gate.js";
+import type {SummaryReadResult} from "./connector-ws.js";
+
+type SummaryRelay={requestSummary:(oauth:TrustedOAuthReadIdentity,deviceId:string,
+  projectId:string)=>Promise<SummaryReadResult|null>};
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const MAX_BODY = 1024 * 1024;
 const noCache = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
@@ -56,9 +62,10 @@ function validOrigin(req: IncomingMessage, config: Config): boolean {
     (origin === config.publicOrigin || config.allowedOrigins.includes(origin)));
 }
 
-export function createHttpServer(config: Config, inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">,devices?:DeviceManagementPort,pairings?:PairingReviewPort,pairingDevice?:PairingDevicePort,deviceSource?:RequestSourceResolver): Server {
+export function createHttpServer(config: Config, inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">,devices?:DeviceManagementPort,pairings?:PairingReviewPort,pairingDevice?:PairingDevicePort,deviceSource?:RequestSourceResolver,
+  summaryRelay?:()=>SummaryRelay|null): Server {
   return createServer((req, res) => {
-    void handleRequest(req, res, config, inventory, verify, grants, identity,devices,pairings,pairingDevice,deviceSource).catch(() => {
+    void handleRequest(req, res, config, inventory, verify, grants, identity,devices,pairings,pairingDevice,deviceSource,summaryRelay).catch(() => {
       if (!res.headersSent) deny(res, 500, "internal_error");
       else res.end();
     });
@@ -67,7 +74,8 @@ export function createHttpServer(config: Config, inventory: Inventory, verify: V
 
 async function handleRequest(
   req: IncomingMessage, res: ServerResponse, config: Config,
-  inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">,devices?:DeviceManagementPort,pairings?:PairingReviewPort,pairingDevice?:PairingDevicePort,deviceSource?:RequestSourceResolver
+  inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">,devices?:DeviceManagementPort,pairings?:PairingReviewPort,pairingDevice?:PairingDevicePort,deviceSource?:RequestSourceResolver,
+  summaryRelay?:()=>SummaryRelay|null
 ): Promise<void> {
     try {
       const path = new URL(req.url ?? "/", config.publicOrigin).pathname;
@@ -220,6 +228,54 @@ async function handleRequest(
           }
           throw error;
         }
+      }
+      // The relay is absent unless connector WS is explicitly enabled. The
+      // bearer JWT, revocation cutoff and project grant are enforced before
+      // any server-to-device request; no browser/session cookie is accepted.
+      if (path === "/api/v1/connector/project-summary" && req.method === "POST"
+          && summaryRelay?.()) {
+        const header=req.headers.authorization;
+        const matched=typeof header==="string" ?
+          /^Bearer ([A-Za-z0-9._~+/-]+={0,2})$/.exec(header) : null;
+        if(!matched){deny(res,401,"authentication_required");return;}
+        let actor;
+        try{actor=await verify(matched[1]);}
+        catch{deny(res,401,"invalid_access_token");return;}
+        if(!actor.sub||!actor.scopes.has("projects:read")||
+          !await inventory.isAccessTokenAllowed(actor.sub,actor.clientId,actor.issuedAt)){
+          deny(res,403,"forbidden");return;
+        }
+        if(req.headers["content-type"]?.split(";")[0]?.trim()!=="application/json"){
+          deny(res,415,"unsupported_media_type");return;
+        }
+        const data=await requestBody(req);
+        if(data.length>512){deny(res,400,"invalid_request");return;}
+        let body:unknown;
+        try{body=JSON.parse(data.toString("utf8"));}
+        catch{deny(res,400,"invalid_request");return;}
+        if(!body||typeof body!=="object"||Array.isArray(body)){
+          deny(res,400,"invalid_request");return;
+        }
+        const fields=body as Record<string,unknown>;
+        if(Object.keys(fields).length!==2||
+          !["deviceId","projectId"].every(key=>Object.hasOwn(fields,key))||
+          typeof fields.deviceId!=="string"||!UUID.test(fields.deviceId)||
+          typeof fields.projectId!=="string"||!UUID.test(fields.projectId)){
+          deny(res,400,"invalid_request");return;
+        }
+        const relay=summaryRelay();
+        const result=await relay?.requestSummary({ownerSub:actor.sub,
+          clientId:actor.clientId,accessTokenIssuedAtSeconds:actor.issuedAt},
+          fields.deviceId,fields.projectId);
+        if(!result){deny(res,404,"not_available");return;}
+        // Reverify JWT expiry and cutoff before returning the data, not just
+        // before dispatch. A token can expire during a local read.
+        try{await verify(matched[1]);}
+        catch{deny(res,403,"forbidden");return;}
+        if(!await inventory.isAccessTokenAllowed(actor.sub,actor.clientId,actor.issuedAt)){
+          deny(res,403,"forbidden");return;
+        }
+        json(res,200,result);return;
       }
       if (path !== "/mcp") {
         deny(res, 404, "not_found");

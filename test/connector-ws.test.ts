@@ -176,3 +176,83 @@ test("invalid device signature never starts an authenticated connector session",
     }
   });
 });
+
+test("authenticated Cloud socket relays one owner-granted metadata read and checks revocation",
+  {skip:!url,timeout:90_000},async()=>{
+  for(const revoked of [false,true]){
+    await inIsolatedDatabase(url!,migrations,async db=>{
+      const owner="summary-owner",clientId="approved-client";
+      const keys=generateKeyPairSync("ed25519");
+      const der=keys.publicKey.export({format:"der",type:"spki"}) as Buffer;
+      const pair=new PgPairingChallenges(db,randomBytes(32));
+      const pairing=await pair.issue("Summary test",der);
+      await pair.review(pairing.id,owner,pairing.userCode,"approve");
+      const enrolled=await pair.enroll(pairing.id,pairing.deviceCode,
+        sign(null,redemptionProof(pairing.id,pairing.deviceCode),keys.privateKey));
+      assert.equal(enrolled.kind,"enrolled");
+      if(enrolled.kind!=="enrolled")return;
+      const device=enrolled.deviceId;
+      const project="77777777-7777-4777-8777-777777777777";
+      await db.query("UPDATE devices SET enabled=true WHERE id=$1",[device]);
+      await db.query("INSERT INTO projects(id,owner_sub,device_id,alias,enabled,max_mode) "+
+        "VALUES($1,$2,$3,'Fixture',true,'readonly')",[project,owner,device]);
+      await db.query("INSERT INTO project_client_grants(project_id,owner_sub,client_id,enabled,max_mode) "+
+        "VALUES($1,$2,$3,true,'readonly')",[project,owner,clientId]);
+      const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
+      await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+      const port=(server.address() as AddressInfo).port;
+      const attached=attachConnectorWebSocket(server,{
+        publicOrigin:"http://127.0.0.1:"+port,
+        sourceOf:()=>"127.0.0.1",
+        proofs:new PgDeviceHandshakes(db),
+        connections:new BoundConnectorConnections(
+          new PgConnectorSessions(db),new PgConnectorReadGate(db))
+      });
+      let ws:WebSocket|undefined;
+      try{
+        ws=await connect("ws://127.0.0.1:"+port+"/api/v1/connector/ws");
+        const challenge=await send(ws,{kind:"device.hello",version:1,
+          ownerSub:owner,deviceId:device});
+        const signed=sign(null,deviceHandshakeProof(field(challenge,"challengeId"),
+          device,field(challenge,"nonce")),keys.privateKey).toString("base64url");
+        const session=await send(ws,{kind:"device.proof",version:1,signature:signed});
+        const signature=sign(null,connectorSessionProof(field(session,"sessionId"),
+          field(session,"challengeId"),device,field(session,"nonce"),
+          field(session,"binding")),keys.privateKey).toString("base64url");
+        const ready=await send(ws,{kind:"connector.session_proof",version:1,signature});
+        assert.equal(ready.kind,"connector.ready");
+        const oauth={ownerSub:owner,clientId,accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)};
+        const outbound=waitMessage(ws);
+        const pending=attached.requestSummary(oauth,device,project);
+        const frame=await outbound;
+        assert.equal(frame.kind,"connector.authorized_read");
+        assert.equal(frame.sequence,1);
+        const request=frame.request as Record<string,unknown>;
+        assert.equal(request.kind,"connector.read_request");
+        assert.equal(request.operation,"project_summary");
+        assert.equal(request.projectId,project);
+        if(revoked){
+          await db.query("UPDATE project_client_grants SET enabled=false WHERE project_id=$1",[project]);
+        }
+        const reply={kind:"connector.local_read_preview",version:1,
+          requestId:request.requestId,projectId:project,operation:"project_summary",
+          files:{projectPresent:true,boardPresent:false,schematicPresent:true}};
+        const ack=revoked ? null : waitMessage(ws);
+        ws.send(JSON.stringify({kind:"connector.read_result",version:1,
+          sequence:1,result:reply}));
+        const result=await pending;
+        if(revoked){assert.equal(result,null);}
+        else{
+          assert.deepEqual(result,reply);
+          const receipt=await ack!;
+          assert.equal(receipt.kind,"connector.read_ack");
+          assert.equal(receipt.requestId,request.requestId);
+        }
+      }finally{
+        ws?.terminate();
+        await attached.close();
+        await new Promise<void>(resolve=>server.close(()=>resolve()));
+      }
+    });
+  }
+});

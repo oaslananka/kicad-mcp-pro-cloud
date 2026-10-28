@@ -40,8 +40,11 @@ const pairingDevice=pairingDeviceEnabled&&connectorPool?
 // existing fail-closed Cloudflare source policy.
 const deviceSource=(wsEnabled||pairingDeviceEnabled)?
   configuredDeviceSource(process.env):undefined;
+// Lazy binding keeps all read surfaces absent when connector WS is disabled.
+let connectorRelay:ReturnType<typeof attachConnectorWebSocket>|null=null;
 const server=createHttpServer(config,inventory,createVerifier(config),inventory,
-  identity,deviceManagement,pairingReview,pairingDevice,deviceSource);
+  identity,deviceManagement,pairingReview,pairingDevice,deviceSource,
+  ()=>connectorRelay);
 const connectorWs=wsEnabled&&connectorPool?attachConnectorWebSocket(server,{
   publicOrigin:config.publicOrigin,
   sourceOf:deviceSource!,
@@ -50,6 +53,7 @@ const connectorWs=wsEnabled&&connectorPool?attachConnectorWebSocket(server,{
     new PgConnectorSessions(connectorPool),
     new PgConnectorReadGate(connectorPool))
 }):null;
+connectorRelay=connectorWs;
 server.listen(config.port, config.host, () => {
   // Never log credential-bearing URLs, project data or request bodies.
   process.stdout.write("Cloud MCP server listening on configured interface\n");

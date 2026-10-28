@@ -286,3 +286,44 @@ test("premium public interface and same-origin stylesheet use hardened headers",
   assert.match(await style.text(),/\.landing-panel/);
   assert.equal((await fetch(endpoint+"/assets/ui.js")).status,404);
 });
+
+test("Cloud read route is absent without connector and validates OAuth and payload when attached",async()=>{
+  const path="/api/v1/connector/project-summary";
+  const validBody=JSON.stringify({deviceId:mockProject.deviceId,projectId:id});
+  const absent=await fetch(endpoint+path,{method:"POST",headers:headers(),body:validBody});
+  assert.equal(absent.status,404);
+  const calls:unknown[]=[];
+  const mockRelay={async requestSummary(actor:unknown,deviceId:string,projectId:string){
+    calls.push({actor,deviceId,projectId});
+    return {kind:"connector.local_read_preview" as const,version:1 as const,
+      requestId:id,projectId,operation:"project_summary" as const,
+      files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
+  }};
+  const proxy=createHttpServer(config,inventory,verify,grants,
+    undefined,undefined,undefined,undefined,undefined,()=>mockRelay);
+  await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
+  const origin="http://127.0.0.1:"+(proxy.address() as AddressInfo).port;
+  try{
+    const send=async(token:string,body=validBody)=>fetch(origin+path,{method:"POST",headers:headers(token),body});
+    assert.equal((await send("invalid")).status,401);
+    assert.equal((await send("test-user-b",JSON.stringify({deviceId:"bad",projectId:id}))).status,400);
+    assert.equal((await send("test-user-a",JSON.stringify({deviceId:mockProject.deviceId,
+      projectId:id,operation:"run_drc"}))).status,400);
+    assert.equal(calls.length,0);
+    accessAllowed=false;
+    assert.equal((await send("test-user-a")).status,403);
+    accessAllowed=true;
+    const accepted=await send("test-user-a");
+    assert.equal(accepted.status,200);
+    assert.equal((await accepted.json()).files.projectPresent,true);
+    assert.deepEqual(calls.at(-1),{
+      actor:{ownerSub:"user-a",clientId:"test-client",
+        accessTokenIssuedAtSeconds:(calls.at(-1) as {actor:{accessTokenIssuedAtSeconds:number}})
+          .actor.accessTokenIssuedAtSeconds},
+      deviceId:mockProject.deviceId,projectId:id
+    });
+  }finally{
+    accessAllowed=true;
+    await new Promise<void>(resolve=>proxy.close(()=>resolve()));
+  }
+});

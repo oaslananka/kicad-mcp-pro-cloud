@@ -1,4 +1,6 @@
 import {type IncomingMessage, type Server} from "node:http";
+import {randomUUID} from "node:crypto";
+import type {TrustedOAuthReadIdentity} from "./connector-read-gate.js";
 import type {Socket} from "node:net";
 import {WebSocket,WebSocketServer} from "ws";
 import {z} from "zod";
@@ -8,10 +10,17 @@ import type {RequestSourceResolver} from "./trusted-ingress.js";
 
 export type DeviceProofPort=Pick<PgDeviceHandshakes,"issue"|"verify"|"cancel">;
 type State="new"|"device_challenge"|"session_challenge"|"ready"|"closed";
+export type SummaryReadResult={
+  kind:"connector.local_read_preview";version:1;requestId:string;
+  projectId:string;operation:"project_summary";
+  files:{projectPresent:boolean;boardPresent:boolean;schematicPresent:boolean};
+};
+type PendingRead={requestId:string;projectId:string;deadline:number;
+  resolve:(value:SummaryReadResult|null)=>void;timer:NodeJS.Timeout};
 type Entry={
   phase:State; owner:string; device:string; challenge:string; nonce:string;
   queued:number; pending:Promise<void>; timer:NodeJS.Timeout | null;
-  lastPong:number; sessionDeadline?:number;
+  lastPong:number; sessionDeadline?:number; readSent?:boolean; awaiting?:PendingRead;
 };
 const hello=z.strictObject({
   kind:z.literal("device.hello"),version:z.literal(1),
@@ -21,6 +30,15 @@ const proof=z.strictObject({kind:z.literal("device.proof"),version:z.literal(1),
   signature:z.string().regex(/^[A-Za-z0-9_-]{86}$/)});
 const sessionProof=z.strictObject({kind:z.literal("connector.session_proof"),version:z.literal(1),
   signature:z.string().regex(/^[A-Za-z0-9_-]{86}$/)});
+const readResult=z.strictObject({
+  kind:z.literal("connector.read_result"),version:z.literal(1),
+  sequence:z.literal(1),result:z.strictObject({
+    kind:z.literal("connector.local_read_preview"),version:z.literal(1),
+    requestId:z.uuid(),projectId:z.uuid(),operation:z.literal("project_summary"),
+    files:z.strictObject({projectPresent:z.boolean(),boardPresent:z.boolean(),
+      schematicPresent:z.boolean()})
+  })
+});
 const CLOSE_POLICY=1008;
 const MAX_SOCKETS=96;
 const MAX_PER_IP=6;
@@ -66,16 +84,20 @@ export function attachConnectorWebSocket(
     maxConnections?:number;
     sourceOf:RequestSourceResolver;
   }
-):{close:()=>Promise<void>}{
+):{close:()=>Promise<void>;requestSummary:(oauth:TrustedOAuthReadIdentity,
+  deviceId:string,projectId:string)=>Promise<SummaryReadResult|null>}{
   const wss=new WebSocketServer({noServer:true,perMessageDeflate:false,
     maxPayload:1024,clientTracking:true});
   const sockets=new Set<WebSocket>();
+  const readyDevices=new Map<string,{socket:WebSocket,entry:Entry}>();
+  const socketKey=(owner:string,device:string)=>JSON.stringify([owner,device]);
   const ipOpen=new Map<string,number>();
   const ipWindows=new Map<string,{start:number,count:number}>();
   // Per-device throttle limits challenge reservation from self-claimed IDs.
   // Distributed DoS limits are still required before feature activation.
   const deviceWindows=new Map<string,{start:number,count:number}>();
   let stopped=false;
+  const waitingOAuth=new WeakMap<PendingRead,TrustedOAuthReadIdentity>();
 
   function allowWindow(buckets:Map<string,{start:number,count:number}>,
     id:string,max:number):boolean{
@@ -115,6 +137,11 @@ export function attachConnectorWebSocket(
         function closed():boolean{return entry.phase==="closed";}
         function fail():void{
           entry.phase="closed";
+          if(entry.awaiting){
+            clearTimeout(entry.awaiting.timer);
+            entry.awaiting.resolve(null);
+            entry.awaiting=undefined;
+          }
           reject(ws);
         }
         function send(msg:object):void{
@@ -186,9 +213,35 @@ export function attachConnectorWebSocket(
             entry.phase="ready";
             expire(Math.max(1,(entry.sessionDeadline??0)-Date.now()));
             send({kind:"connector.ready",version:1});
+            readyDevices.set(socketKey(entry.owner,entry.device),{socket:ws,entry});
             return;
           }
-          // No remote operation or arbitrary frame is implemented.
+          // A result is meaningful only if this same authenticated socket
+          // has an outstanding, pre-authorized server-originated request.
+          if(entry.phase==="ready"&&entry.awaiting){
+            const pending=entry.awaiting;
+            entry.awaiting=undefined;
+            clearTimeout(pending.timer);
+            const decoded=readResult.safeParse(raw);
+            if(!decoded.success||Date.now()>=pending.deadline||
+               decoded.data.result.requestId!==pending.requestId||
+               decoded.data.result.projectId!==pending.projectId){
+              pending.resolve(null);fail();return;
+            }
+            // Revocation between request and result must discard the answer.
+            // The OAuth authority is bound in the pending closure below.
+            const allowed=await options.connections.authorizeOutgoingSummary(
+              ws,waitingOAuth.get(pending)!,pending.projectId);
+            if(!allowed||closed()){
+              pending.resolve(null);fail();return;
+            }
+            send({kind:"connector.read_ack",version:1,sequence:1,
+              requestId:pending.requestId});
+            pending.resolve(decoded.data.result);
+            ws.close(1000,"read_completed");
+            return;
+          }
+          // No native operation, unsolicited result, or arbitrary frame.
           fail();
         }
         expire(INITIAL_TIMEOUT);
@@ -205,6 +258,13 @@ export function attachConnectorWebSocket(
           entry.phase="closed";
           if(entry.timer)clearTimeout(entry.timer);
           sockets.delete(ws);
+          const key=socketKey(entry.owner,entry.device);
+          if(readyDevices.get(key)?.socket===ws)readyDevices.delete(key);
+          if(entry.awaiting){
+            clearTimeout(entry.awaiting.timer);
+            entry.awaiting.resolve(null);
+            entry.awaiting=undefined;
+          }
           const count=(ipOpen.get(ip)??1)-1;
           if(count<=0)ipOpen.delete(ip);else ipOpen.set(ip,count);
           void Promise.allSettled([
@@ -233,7 +293,41 @@ export function attachConnectorWebSocket(
       if(now-b.start>=MINUTE)deviceWindows.delete(id);
   },30_000);
   heartbeat.unref();
-  return {close:async()=>{
+  async function requestSummary(oauth:TrustedOAuthReadIdentity,deviceId:string,
+    projectId:string):Promise<SummaryReadResult|null>{
+    if(stopped||!oauth||typeof oauth.ownerSub!=="string"||
+      !/^[0-9a-f-]{36}$/i.test(deviceId)||
+      !/^[0-9a-f-]{36}$/i.test(projectId))return null;
+    const active=readyDevices.get(socketKey(oauth.ownerSub,deviceId));
+    if(!active)return null;
+    const {socket,entry}=active;
+    if(entry.phase!=="ready"||entry.readSent||entry.awaiting||
+      socket.readyState!==WebSocket.OPEN||
+      (entry.sessionDeadline??0)-Date.now()<10_000)return null;
+    entry.readSent=true; // Reserve before any async authorization awaits.
+    if(!await options.connections.authorizeOutgoingSummary(socket,oauth,projectId)||
+      entry.phase!=="ready"||socket.readyState!==WebSocket.OPEN)return null;
+    const requestId=randomUUID();
+    return new Promise<SummaryReadResult|null>(resolve=>{
+      const timer=setTimeout(()=>{
+        entry.awaiting=undefined;resolve(null);reject(socket);
+      },12_000);
+      timer.unref();
+      const deadline=Date.now()+8_000;
+      const pending:PendingRead={requestId,projectId,deadline,resolve,timer};
+      waitingOAuth.set(pending,oauth);
+      entry.awaiting=pending;
+      try{socket.send(JSON.stringify({
+        kind:"connector.authorized_read",version:1,sequence:1,
+        request:{kind:"connector.read_request",version:1,requestId,
+          deviceId,projectId,operation:"project_summary",deadlineUnixMs:deadline}
+      }));}catch{
+        clearTimeout(timer);entry.awaiting=undefined;resolve(null);reject(socket);
+      }
+    });
+  }
+
+  return {requestSummary,close:async()=>{
     if(stopped)return;
     stopped=true;
     clearInterval(heartbeat);
