@@ -68,15 +68,24 @@ else if(kind==="google"){
     // No raw credentials are emitted or persisted. Keyed HMAC makes this a
     // change detector, not a standalone hash of guessable client IDs.
     // Use the production-random Better Auth root secret as the HMAC key.
-    const keys=[
-      "PUBLIC_ORIGIN","OAUTH_ISSUER","OAUTH_JWKS_URL","OAUTH_AUDIENCE",
-      "KICAD_DB_PASSWORD","AUTH_MODE","BETTER_AUTH_SECRET",
-      "GITHUB_CLIENT_ID","GITHUB_CLIENT_SECRET",
-      "GOOGLE_CLIENT_ID","GOOGLE_CLIENT_SECRET","MANAGEMENT_CLIENT_ID",
-      "ALLOWED_ORIGINS","KICAD_TUNNEL_NETWORK","CLOUDFLARE_TUNNEL_TOKEN",
-      "PAIRING_DEVICE_API_ENABLED","CONNECTOR_WS_ENABLED"
+    // Explicitly enumerated selectors only: dynamic environment property
+    // access would expand the trusted input surface for this check.
+    const values=[
+      ["PUBLIC_ORIGIN",origin],
+      ["OAUTH_ISSUER",issuer],["OAUTH_JWKS_URL",jwks],
+      ["OAUTH_AUDIENCE",audience],
+      ["KICAD_DB_PASSWORD",process.env.KICAD_DB_PASSWORD??null],
+      ["AUTH_MODE",auth],
+      ["BETTER_AUTH_SECRET",process.env.BETTER_AUTH_SECRET??null],
+      ["GITHUB_CLIENT_ID",githubId],["GITHUB_CLIENT_SECRET",githubSecret],
+      ["GOOGLE_CLIENT_ID",googleId],["GOOGLE_CLIENT_SECRET",googleSecret],
+      ["MANAGEMENT_CLIENT_ID",process.env.MANAGEMENT_CLIENT_ID??null],
+      ["ALLOWED_ORIGINS",process.env.ALLOWED_ORIGINS??null],
+      ["KICAD_TUNNEL_NETWORK",network],
+      ["CLOUDFLARE_TUNNEL_TOKEN",process.env.CLOUDFLARE_TUNNEL_TOKEN??null],
+      ["PAIRING_DEVICE_API_ENABLED",process.env.PAIRING_DEVICE_API_ENABLED??null],
+      ["CONNECTOR_WS_ENABLED",process.env.CONNECTOR_WS_ENABLED??null]
     ];
-    const values=keys.map(key=>[key,process.env[key]??null]);
     const digest=createHmac("sha256",process.env.BETTER_AUTH_SECRET)
       .update(JSON.stringify(values)).digest("hex");
     process.stdout.write(digest+"\n");
