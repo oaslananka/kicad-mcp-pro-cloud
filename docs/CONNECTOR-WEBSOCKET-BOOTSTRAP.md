@@ -98,6 +98,16 @@ response cannot restart or renew a rejected read. The isolated localhost
 WebSocket regression uses a test-accelerated timer to prove that a
 stuck first check resolves the HTTP promise with `null`, sends no
 `connector.authorized_read` and closes with policy code 1008.
+The first preflight also races the authenticated WebSocket's
+`close` event: if the physical device disconnects while the initial
+database authorization is in progress, the HTTP relay promise resolves
+with `null` immediately instead of waiting for the full eight-second
+preflight timeout. The disconnect listener is removed as soon as
+preflight completes. A RED-before-GREEN localhost WebSocket regression
+proves no read frame or metadata is delivered and that the read wait
+ends on device disconnect; the existing four expiry, final-validation,
+and timeout cases remain green.
+
 The separate twelve-second post-dispatch watchdog still applies to
 the subsequent one-shot read and final revalidation. Real DB queries
 may continue server-side after their caller times out; database-level
