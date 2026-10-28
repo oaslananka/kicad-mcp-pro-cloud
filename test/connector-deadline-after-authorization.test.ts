@@ -25,10 +25,19 @@ function nextFrame(ws:WebSocket):Promise<Record<string,unknown>>{
   });
 }
 
-for(const scenario of ["expired-deadline","stalled-grant",
+for(const scenario of ["missing-owner-consent","rejected-owner-consent",
+  "stalled-owner-consent","approved-one-shot","expired-deadline","stalled-grant",
   "disconnected-grant","stalled-preflight","disconnected-preflight",
   "rejected-preflight","rejected-final-grant"] as const){
-test(scenario==="expired-deadline" ?
+test(scenario==="missing-owner-consent" ?
+  "unavailable independent owner approval must deny before Cloud dispatch" :
+  scenario==="rejected-owner-consent" ?
+  "independent owner refusal must prevent read dispatch even with a valid device and grant" :
+  scenario==="stalled-owner-consent" ?
+  "unresponsive owner verifier cannot leave a Cloud read pending or send metadata" :
+  scenario==="approved-one-shot" ?
+  "independently approved synthetic one-shot binds exact request and sends only one summary" :
+  scenario==="expired-deadline" ?
   "a result finishing its async grant check after request deadline is never delivered" :
   scenario==="stalled-grant" ?
   "read timeout remains armed while the last DB grant check is pending" :
@@ -55,6 +64,7 @@ test(scenario==="expired-deadline" ?
   let signalSecond!:()=>void;
   const secondStarted=new Promise<void>(resolve=>{signalSecond=resolve;});
   let checks=0;
+  let approvedRequestId:string|undefined;
   const connections={
     begin:async()=>({kind:"issued",sessionId:session,challengeId:randomUUID(),
       nonce:"N".repeat(43),binding:"B".repeat(43),expiresAtMs:Date.now()+60_000}),
@@ -77,7 +87,26 @@ test(scenario==="expired-deadline" ?
   const port=(http.address() as AddressInfo).port;
   const relay=attachConnectorWebSocket(http,{
     publicOrigin:"http://127.0.0.1:"+port,
-    sourceOf:()=>"127.0.0.1",proofs,connections
+    sourceOf:()=>"127.0.0.1",proofs,connections,
+    ...(scenario==="missing-owner-consent"?{}:{
+      ownerConsent:{consume:async(scope:{
+        oauth:{ownerSub:string;clientId:string};deviceId:string;projectId:string;
+        requestId:string;operation:string;expiresAtUnixMs:number;
+      })=>{
+        // Synthetic port. Real production has no owner verifier configured.
+        assert.equal(scope.oauth.ownerSub,owner);
+        assert.equal(scope.oauth.clientId,"synthetic-client");
+        assert.equal(scope.deviceId,device);
+        assert.equal(scope.projectId,project);
+        assert.equal(scope.operation,"project_summary");
+        assert.match(scope.requestId,/^[0-9a-f-]{36}$/);
+        approvedRequestId=scope.requestId;
+        assert.ok(scope.expiresAtUnixMs>Date.now());
+        if(scenario==="rejected-owner-consent")return false;
+        if(scenario==="stalled-owner-consent")return new Promise<boolean>(()=>{});
+        return true;
+      }}
+    })
   });
   let ws:WebSocket|undefined;
   const originalNow=Date.now;
@@ -100,6 +129,31 @@ test(scenario==="expired-deadline" ?
       signature:Buffer.alloc(64,4).toString("base64url")}));
     assert.equal((await next).kind,"connector.ready");
 
+    if(scenario==="missing-owner-consent"||scenario==="rejected-owner-consent"||
+      scenario==="stalled-owner-consent"){
+      let requestSent=false;
+      ws.on("message",()=>{requestSent=true;});
+      const closed=new Promise<number>(resolve=>ws!.once("close",resolve));
+      if(scenario==="stalled-owner-consent"){
+        globalThis.setTimeout=((...args:Parameters<typeof setTimeout>)=>{
+          const [handler,delay,...rest]=args;
+          return originalTimeout(handler,delay===8_000?80:delay,...rest);
+        }) as typeof setTimeout;
+      }
+      const attempt=relay.requestSummary({ownerSub:owner,clientId:"synthetic-client",
+        accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)},device,project);
+      globalThis.setTimeout=originalTimeout;
+      const result=await Promise.race([
+        attempt,
+        new Promise<"missing-consent-not-bounded">(resolve=>
+          originalTimeout(()=>resolve("missing-consent-not-bounded"),350))
+      ]);
+      assert.equal(result,null,"without trusted owner approval no read is permitted");
+      assert.equal(requestSent,false,"no read can cross WSS without owner consent");
+      assert.equal(checks,0,"the grant check must not substitute for owner consent");
+      if(scenario!=="missing-owner-consent")assert.equal(await closed,1008);
+      return;
+    }
     if(scenario==="stalled-preflight"||
        scenario==="disconnected-preflight"||scenario==="rejected-preflight"){
       let requestSent=false;
@@ -114,8 +168,11 @@ test(scenario==="expired-deadline" ?
       const preflight=relay.requestSummary({ownerSub:owner,
         clientId:"synthetic-client",
         accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)},device,project);
-      globalThis.setTimeout=originalTimeout;
+      // The owner-consent step adds an async boundary. Keep the accelerated
+      // test clock installed until DB preflight has actually started and
+      // registered its watchdog; otherwise this measures the wrong timer.
       if(scenario!=="rejected-preflight")await secondStarted;
+      globalThis.setTimeout=originalTimeout;
       if(scenario==="disconnected-preflight")ws.terminate();
       const outcome=await Promise.race([
         preflight.then(value=>value,()=> "preflight-rejected" as const),
@@ -144,6 +201,8 @@ test(scenario==="expired-deadline" ?
     globalThis.setTimeout=originalTimeout;
     assert.equal(sent.kind,"connector.authorized_read");
     const request=sent.request as Record<string,unknown>;
+    assert.equal(approvedRequestId,request.requestId,
+      "owner assertion must consume the exact WSS read request ID");
     const deadline=request.deadlineUnixMs as number;
     const reply={kind:"connector.read_result",version:1,sequence:1,
       result:{kind:"connector.local_read_preview",version:1,
@@ -157,6 +216,17 @@ test(scenario==="expired-deadline" ?
     });
     ws.send(JSON.stringify(reply));
     await secondStarted;
+    if(scenario==="approved-one-shot"){
+      resolveSecond(true);
+      assert.deepEqual(await pending,reply.result);
+      assert.equal(await closed,1000);
+      assert.equal(ackDelivered,true,"one acknowledged summary only");
+      assert.equal(checks,2);
+      assert.equal(await relay.requestSummary({ownerSub:owner,clientId:"synthetic-client",
+        accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)},device,project),null,
+        "completed one-shot may not be reused");
+      return;
+    }
     if(scenario==="expired-deadline"){
       // The time of the authorization result (not only its start) matters.
       Date.now=()=>deadline+1;

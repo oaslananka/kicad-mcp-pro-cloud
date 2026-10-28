@@ -69,6 +69,7 @@ async function startFixtureServer(db:Pool){
     publicOrigin:"http://127.0.0.1:"+port,
     sourceOf:()=>"127.0.0.1",
     proofs:new PgDeviceHandshakes(db),
+    ownerConsent:{consume:async()=>true}, // Synthetic fixture, not human approval.
     connections:new BoundConnectorConnections(
       new PgConnectorSessions(db),new PgConnectorReadGate(db))
   });

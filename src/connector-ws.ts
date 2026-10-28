@@ -10,6 +10,19 @@ import type {PgDeviceHandshakes} from "./device-handshake.js";
 import type {RequestSourceResolver} from "./trusted-ingress.js";
 
 export type DeviceProofPort=Pick<PgDeviceHandshakes,"issue"|"verify"|"cancel">;
+/**
+ * A server-verified owner authorization, not the device proof, terminal PTY,
+ * OAuth client's consent or a caller-supplied authorization flag.
+ * `consume` MUST atomically verify and burn one trusted owner-authenticated
+ * challenge bound to this exact read. No implementation is wired in main.ts:
+ * without one, even an enabled connector can never dispatch a Cloud read.
+ */
+export type OwnerReadConsentPort={
+  consume:(scope:Readonly<{
+    oauth:TrustedOAuthReadIdentity;deviceId:string;projectId:string;
+    requestId:string;operation:"project_summary";expiresAtUnixMs:number;
+  }>)=>Promise<boolean>;
+};
 type State="new"|"device_challenge"|"session_challenge"|"ready"|"closed";
 export type SummaryReadResult={
   kind:"connector.local_read_preview";version:1;requestId:string;
@@ -83,6 +96,8 @@ export function attachConnectorWebSocket(
     publicOrigin:string;
     proofs:DeviceProofPort;
     connections:BoundConnectorConnections;
+    /** No production owner-consent verifier has been provisioned. Fail closed. */
+    ownerConsent?:OwnerReadConsentPort;
     maxConnections?:number;
     sourceOf:RequestSourceResolver;
   }
@@ -321,7 +336,7 @@ export function attachConnectorWebSocket(
   heartbeat.unref();
   async function requestSummary(oauth:TrustedOAuthReadIdentity,deviceId:string,
     projectId:string):Promise<SummaryReadResult|null>{
-    if(stopped||!oauth||typeof oauth.ownerSub!=="string"||
+    if(stopped||!options.ownerConsent||!oauth||typeof oauth.ownerSub!=="string"||
       !/^[0-9a-f-]{36}$/i.test(deviceId)||
       !/^[0-9a-f-]{36}$/i.test(projectId))return null;
     const active=readyDevices.get(socketKey(oauth.ownerSub,deviceId));
@@ -331,6 +346,39 @@ export function attachConnectorWebSocket(
       socket.readyState!==WebSocket.OPEN||
       (entry.sessionDeadline??0)-performance.now()<10_000)return null;
     entry.readSent=true; // Reserve before any async authorization awaits.
+    const requestId=randomUUID();
+    const ownerExpiresAtUnixMs=Date.now()+30_000;
+    const ownerExpiresAtMonotonic=performance.now()+30_000;
+    // A registered verifier must consume a freshly owner-authenticated,
+    // one-shot assertion; OAuth and device signatures cannot replace it.
+    let consentTimer:ReturnType<typeof setTimeout>|undefined;
+    let consentTimedOut=false;
+    let onConsentDisconnect:()=>void=()=>{};
+    const consentDisconnected=new Promise<boolean>(resolve=>{
+      onConsentDisconnect=()=>resolve(false);
+      socket.once("close",onConsentDisconnect);
+    });
+    let consented:boolean;
+    try{
+      consented=await Promise.race([
+        options.ownerConsent.consume({oauth,deviceId,projectId,requestId,
+          operation:"project_summary",expiresAtUnixMs:ownerExpiresAtUnixMs}),
+        new Promise<boolean>(resolve=>{
+          consentTimer=setTimeout(()=>{consentTimedOut=true;resolve(false);},8_000);
+          consentTimer.unref();
+        }),
+        consentDisconnected
+      ]).finally(()=>{
+        if(consentTimer)clearTimeout(consentTimer);
+        socket.off("close",onConsentDisconnect);
+      });
+    }catch{reject(socket);return null;}
+    if(!consented||consentTimedOut||entry.phase!=="ready"||
+      socket.readyState!==WebSocket.OPEN||
+      performance.now()>=ownerExpiresAtMonotonic||
+      Date.now()>=ownerExpiresAtUnixMs){
+      reject(socket);return null;
+    }
     let preflightTimer:ReturnType<typeof setTimeout>|undefined;
     let preflightTimedOut=false;
     let onDisconnect:()=>void=()=>{};
@@ -362,7 +410,9 @@ export function attachConnectorWebSocket(
     if(preflightTimedOut){reject(socket);return null;}
     if(!allowed||entry.phase!=="ready"||socket.readyState!==WebSocket.OPEN||
       (entry.sessionDeadline??0)-performance.now()<10_000)return null;
-    const requestId=randomUUID();
+    if(performance.now()>=ownerExpiresAtMonotonic||Date.now()>=ownerExpiresAtUnixMs){
+      reject(socket);return null;
+    }
     return new Promise<SummaryReadResult|null>(resolve=>{
       const timer=setTimeout(()=>{
         entry.awaiting=undefined;
@@ -372,8 +422,11 @@ export function attachConnectorWebSocket(
       timer.unref();
       // Wall milliseconds remain in the wire frame; local authorization cannot
       // be extended by changing the host system clock.
-      const deadline=Date.now()+8_000;
-      const monotonicDeadline=performance.now()+8_000;
+      const deadline=Math.min(Date.now()+8_000,ownerExpiresAtUnixMs);
+      const monotonicDeadline=Math.min(performance.now()+8_000,ownerExpiresAtMonotonic);
+      if(deadline<=Date.now()||monotonicDeadline<=performance.now()){
+        clearTimeout(timer);resolve(null);reject(socket);return;
+      }
       const pending:PendingRead={requestId,projectId,deadline,monotonicDeadline,resolve,timer};
       waitingOAuth.set(pending,oauth);
       entry.awaiting=pending;

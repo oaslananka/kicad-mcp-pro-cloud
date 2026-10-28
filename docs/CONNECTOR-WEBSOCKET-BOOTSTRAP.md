@@ -179,6 +179,47 @@ the expired-deadline scenario. This is bounded cancellation, **not**
 a guarantee that a backend DB query itself gets cancelled; production
 query timeouts still require independent database configuration.
 
+## Independent owner consent: read dispatch now defaults to deny
+
+A device's two valid Ed25519 transport proofs and a valid OAuth client/project
+`readonly` grant do **not** prove an independent human approved a local read.
+The Cloud relay's `requestSummary` now fails closed when no
+`OwnerReadConsentPort` is configured. `src/main.ts` deliberately does not
+configure that port, so turning on the dormant WebSocket feature flag alone
+**cannot dispatch any `connector.authorized_read` frame**.
+
+The port is a server-owned contract to **atomically verify and consume** a
+future independently owner-authenticated, one-shot authorization. It receives
+the verified OAuth identity, exact device/project, a newly generated request
+UUID, the sole allowed `project_summary` operation, and an absolute expiry.
+The same UUID goes into the WebSocket read, and its deadline is capped by
+both the accepted owner window and the eight-second read budget. A rejected,
+unavailable or stalled verifier denies before database grant/dispatch; the
+stall has an independent eight-second watchdog and a closed device socket
+releases the wait. A consumed owner decision cannot be retried on the same
+session; metadata also stays subject to the existing post-read OAuth and grant
+checks. The connector is deliberately one-shot.
+
+**No real owner verification port, public enrollment, credential or user
+presence authenticator has been implemented.** Only synthetic test fixtures
+inject a port that returns true to exercise the existing transport/grant
+behavior. Their success must never be labeled real owner approval; a
+production port must be backed by a separately verified authenticator and
+atomic replay-proof persistence, not a PTY or device signing key.
+The partner local repository's
+[owner consent boundary design](https://github.com/oaslananka/kicad-mcp-pro/blob/69342ceb90b83a471111286933f9a2e86e67de2f/docs/cloud/OWNER-CONSENT-BOUNDARY-ACCEPTANCE.md)
+defines the outstanding independent-principal and human-authentication tests.
+
+Red/green integration evidence: before this guard, a real temporary signed
+WebSocket session proceeded without any owner verifier. After the guard,
+`test/connector-deadline-after-authorization.test.ts` confirms no frame and no
+DB grant preflight without an owner port, plus rejection/timeout denial,
+exact UUID binding, one-shot positive synthetic handling, expired deadlines,
+revocation, stalled DB and device-disconnect behavior. Full `npm run check`
+passed with **135/135 tests**, none skipped, against a fresh temporary,
+isolated PostgreSQL 17 container; no production Cloud credentials/data,
+deployment or host-service changes.
+
 ## Not yet authorized or integrated
 
 - Native local desktop connector enrollment, secure Ed25519 private-key
