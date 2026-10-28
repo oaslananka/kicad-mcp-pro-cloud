@@ -25,12 +25,15 @@ function nextFrame(ws:WebSocket):Promise<Record<string,unknown>>{
   });
 }
 
-for(const scenario of ["expired-deadline","stalled-grant","disconnected-grant"] as const){
+for(const scenario of ["expired-deadline","stalled-grant",
+  "disconnected-grant","stalled-preflight"] as const){
 test(scenario==="expired-deadline" ?
   "a result finishing its async grant check after request deadline is never delivered" :
   scenario==="stalled-grant" ?
   "read timeout remains armed while the last DB grant check is pending" :
-  "closed WebSocket releases HTTP wait even if final DB check is pending",
+  scenario==="disconnected-grant" ?
+  "closed WebSocket releases HTTP wait even if final DB check is pending" :
+  "initial DB grant stall cannot hold an HTTP read forever",
   {timeout:12_000},async()=>{
   const owner="synthetic-owner",device=randomUUID(),project=randomUUID();
   const session=randomUUID(),challenge=randomUUID();
@@ -51,7 +54,7 @@ test(scenario==="expired-deadline" ?
     activate:async()=>true,
     authorizeOutgoingSummary:async()=>{
       checks++;
-      if(checks===1)return true;
+      if(checks===1 && scenario!=="stalled-preflight")return true;
       signalSecond();
       return delayedSecond;
     },
@@ -85,6 +88,29 @@ test(scenario==="expired-deadline" ?
       signature:Buffer.alloc(64,4).toString("base64url")}));
     assert.equal((await next).kind,"connector.ready");
 
+    if(scenario==="stalled-preflight"){
+      let requestSent=false;
+      ws.on("message",()=>{requestSent=true;});
+      const closed=new Promise<number>(resolve=>ws!.once("close",resolve));
+      globalThis.setTimeout=((...args:Parameters<typeof setTimeout>)=>{
+        const [handler,delay,...rest]=args;
+        return originalTimeout(handler,delay===8_000?80:delay,...rest);
+      }) as typeof setTimeout;
+      const preflight=relay.requestSummary({ownerSub:owner,
+        clientId:"synthetic-client",
+        accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)},device,project);
+      globalThis.setTimeout=originalTimeout;
+      await secondStarted;
+      const outcome=await Promise.race([
+        preflight,new Promise<"preflight-not-bounded">(resolve=>
+          originalTimeout(()=>resolve("preflight-not-bounded"),350))
+      ]);
+      assert.equal(outcome,null,"preflight must time out without sending a read");
+      assert.equal(requestSent,false,"preflight failure must not dispatch a read");
+      assert.equal(await closed,1008,"stalled preflight should close device session");
+      resolveSecond(false);
+      return;
+    }
     next=nextFrame(ws);
     if(scenario==="stalled-grant"){
       // Speed up only the server's 12s request watchdog; never change its

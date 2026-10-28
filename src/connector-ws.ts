@@ -328,8 +328,20 @@ export function attachConnectorWebSocket(
       socket.readyState!==WebSocket.OPEN||
       (entry.sessionDeadline??0)-Date.now()<10_000)return null;
     entry.readSent=true; // Reserve before any async authorization awaits.
-    if(!await options.connections.authorizeOutgoingSummary(socket,oauth,projectId)||
-      entry.phase!=="ready"||socket.readyState!==WebSocket.OPEN)return null;
+    let preflightTimer:ReturnType<typeof setTimeout>|undefined;
+    let preflightTimedOut=false;
+    // A stalled *initial* database grant check must not leave the HTTP
+    // request pending before the 12-second read watchdog even exists.
+    const allowed=await Promise.race([
+      options.connections.authorizeOutgoingSummary(socket,oauth,projectId),
+      new Promise<boolean>(resolve=>{
+        preflightTimer=setTimeout(()=>{preflightTimedOut=true;resolve(false);},8_000);
+        preflightTimer.unref();
+      })
+    ]).finally(()=>{if(preflightTimer)clearTimeout(preflightTimer);});
+    if(preflightTimedOut){reject(socket);return null;}
+    if(!allowed||entry.phase!=="ready"||socket.readyState!==WebSocket.OPEN||
+      (entry.sessionDeadline??0)-Date.now()<10_000)return null;
     const requestId=randomUUID();
     return new Promise<SummaryReadResult|null>(resolve=>{
       const timer=setTimeout(()=>{

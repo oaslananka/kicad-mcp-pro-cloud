@@ -86,6 +86,23 @@ This does **not** establish production ingress, real user OAuth, or
 independent local operator approval.
 
 
+**Initial authorization also has a finite budget:** A signed
+`connector.authorized_read` is not constructed until the initial
+owner/client/project grant preflight returns. This first DB check
+previously had **no request watchdog** at all; a stalled query could
+leave an HTTP read waiting indefinitely with no remote frame sent.
+The Cloud relay now limits initial preflight waiting to eight seconds,
+rejects the socket on timeout, and refuses to send if less than ten
+seconds remain in the device session after the check. A delayed DB
+response cannot restart or renew a rejected read. The isolated localhost
+WebSocket regression uses a test-accelerated timer to prove that a
+stuck first check resolves the HTTP promise with `null`, sends no
+`connector.authorized_read` and closes with policy code 1008.
+The separate twelve-second post-dispatch watchdog still applies to
+the subsequent one-shot read and final revalidation. Real DB queries
+may continue server-side after their caller times out; database-level
+query timeouts remain an independent operational control.
+
 **Stalled final database check and socket disconnect:** The 12-second
 request watchdog must remain armed while the final asynchronous grant
 revalidation is pending; clearing it at receipt of the local result would
