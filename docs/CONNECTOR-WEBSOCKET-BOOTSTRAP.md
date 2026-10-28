@@ -85,6 +85,21 @@ grant, token and device revocation; test actors and keys are synthetic.
 This does **not** establish production ingress, real user OAuth, or
 independent local operator approval.
 
+
+**Stalled final database check and socket disconnect:** The 12-second
+request watchdog must remain armed while the final asynchronous grant
+revalidation is pending; clearing it at receipt of the local result would
+leave the HTTP relay promise waiting indefinitely on a stuck database
+query. A distinct per-socket in-flight validation reference lets the
+timeout, WebSocket disconnect and policy-close cleanup settle that
+promise with `null` immediately, without acknowledging or releasing
+the cached metadata. `test/connector-deadline-after-authorization.test.ts`
+also exercises a stalled validation under a test-only accelerated
+watchdog and device disconnect before validation finishes, alongside
+the expired-deadline scenario. This is bounded cancellation, **not**
+a guarantee that a backend DB query itself gets cancelled; production
+query timeouts still require independent database configuration.
+
 ## Not yet authorized or integrated
 
 - Native local desktop connector enrollment, secure Ed25519 private-key

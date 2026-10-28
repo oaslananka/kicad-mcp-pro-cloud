@@ -20,7 +20,8 @@ type PendingRead={requestId:string;projectId:string;deadline:number;
 type Entry={
   phase:State; owner:string; device:string; challenge:string; nonce:string;
   queued:number; pending:Promise<void>; timer:NodeJS.Timeout | null;
-  lastPong:number; sessionDeadline?:number; readSent?:boolean; awaiting?:PendingRead;
+  lastPong:number; sessionDeadline?:number; readSent?:boolean;
+  awaiting?:PendingRead; validating?:PendingRead;
 };
 const hello=z.strictObject({
   kind:z.literal("device.hello"),version:z.literal(1),
@@ -142,6 +143,11 @@ export function attachConnectorWebSocket(
             entry.awaiting.resolve(null);
             entry.awaiting=undefined;
           }
+          if(entry.validating){
+            clearTimeout(entry.validating.timer);
+            entry.validating.resolve(null);
+            entry.validating=undefined;
+          }
           reject(ws);
         }
         function send(msg:object):void{
@@ -221,17 +227,24 @@ export function attachConnectorWebSocket(
           if(entry.phase==="ready"&&entry.awaiting){
             const pending=entry.awaiting;
             entry.awaiting=undefined;
-            clearTimeout(pending.timer);
+            entry.validating=pending;
+            // Do not cancel the 12s request watchdog while the final
+            // database grant check is still awaiting a response. Otherwise
+            // a stalled query can hold the HTTP relay promise indefinitely.
             const decoded=readResult.safeParse(raw);
             if(!decoded.success||Date.now()>=pending.deadline||
                decoded.data.result.requestId!==pending.requestId||
                decoded.data.result.projectId!==pending.projectId){
+              entry.validating=undefined;
+              clearTimeout(pending.timer);
               pending.resolve(null);fail();return;
             }
             // Revocation between request and result must discard the answer.
             // The OAuth authority is bound in the pending closure below.
             const allowed=await options.connections.authorizeOutgoingSummary(
               ws,waitingOAuth.get(pending)!,pending.projectId);
+            entry.validating=undefined;
+            clearTimeout(pending.timer);
             // The database grant check is asynchronous. Neither its start
             // time nor a previously valid socket extends the signed request
             // deadline or the device session lease.
@@ -269,6 +282,11 @@ export function attachConnectorWebSocket(
             clearTimeout(entry.awaiting.timer);
             entry.awaiting.resolve(null);
             entry.awaiting=undefined;
+          }
+          if(entry.validating){
+            clearTimeout(entry.validating.timer);
+            entry.validating.resolve(null);
+            entry.validating=undefined;
           }
           const count=(ipOpen.get(ip)??1)-1;
           if(count<=0)ipOpen.delete(ip);else ipOpen.set(ip,count);
@@ -315,7 +333,9 @@ export function attachConnectorWebSocket(
     const requestId=randomUUID();
     return new Promise<SummaryReadResult|null>(resolve=>{
       const timer=setTimeout(()=>{
-        entry.awaiting=undefined;resolve(null);reject(socket);
+        entry.awaiting=undefined;
+        entry.validating=undefined;
+        resolve(null);reject(socket);
       },12_000);
       timer.unref();
       const deadline=Date.now()+8_000;

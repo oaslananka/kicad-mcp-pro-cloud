@@ -25,7 +25,12 @@ function nextFrame(ws:WebSocket):Promise<Record<string,unknown>>{
   });
 }
 
-test("a result finishing its async grant check after request deadline is never delivered",
+for(const scenario of ["expired-deadline","stalled-grant","disconnected-grant"] as const){
+test(scenario==="expired-deadline" ?
+  "a result finishing its async grant check after request deadline is never delivered" :
+  scenario==="stalled-grant" ?
+  "read timeout remains armed while the last DB grant check is pending" :
+  "closed WebSocket releases HTTP wait even if final DB check is pending",
   {timeout:12_000},async()=>{
   const owner="synthetic-owner",device=randomUUID(),project=randomUUID();
   const session=randomUUID(),challenge=randomUUID();
@@ -61,6 +66,7 @@ test("a result finishing its async grant check after request deadline is never d
   });
   let ws:WebSocket|undefined;
   const originalNow=Date.now;
+  const originalTimeout=globalThis.setTimeout;
   try{
     ws=await new Promise<WebSocket>((resolve,reject)=>{
       const socket=new WebSocket("ws://127.0.0.1:"+port+"/api/v1/connector/ws",{perMessageDeflate:false});
@@ -80,9 +86,18 @@ test("a result finishing its async grant check after request deadline is never d
     assert.equal((await next).kind,"connector.ready");
 
     next=nextFrame(ws);
+    if(scenario==="stalled-grant"){
+      // Speed up only the server's 12s request watchdog; never change its
+      // authorization deadline or alter any production code.
+      globalThis.setTimeout=((...args:Parameters<typeof setTimeout>)=>{
+        const [handler,delay,...rest]=args;
+        return originalTimeout(handler,delay===12_000?80:delay,...rest);
+      }) as typeof setTimeout;
+    }
     const pending=relay.requestSummary({ownerSub:owner,clientId:"synthetic-client",
       accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)},device,project);
     const sent=await next;
+    globalThis.setTimeout=originalTimeout;
     assert.equal(sent.kind,"connector.authorized_read");
     const request=sent.request as Record<string,unknown>;
     const deadline=request.deadlineUnixMs as number;
@@ -98,18 +113,42 @@ test("a result finishing its async grant check after request deadline is never d
     });
     ws.send(JSON.stringify(reply));
     await secondStarted;
-    // The time of the authorization result (not only its start) matters.
-    Date.now=()=>deadline+1;
-    resolveSecond(true);
-    assert.equal(await pending,null,
-      "an approved result that outlives its signed deadline must be discarded");
+    if(scenario==="expired-deadline"){
+      // The time of the authorization result (not only its start) matters.
+      Date.now=()=>deadline+1;
+      resolveSecond(true);
+      assert.equal(await pending,null,
+        "an approved result that outlives its signed deadline must be discarded");
+    }else if(scenario==="stalled-grant"){
+      // The final database grant can hang: the independent request budget
+      // must complete with null without ever waiting for DB resolution.
+      const state=await Promise.race([
+        pending, new Promise<"timeout-not-armed">(resolve=>
+          originalTimeout(()=>resolve("timeout-not-armed"),350))
+      ]);
+      assert.equal(state,null,"the in-flight final grant must retain its watchdog");
+      resolveSecond(true);
+    }else{
+      // No read-result relay promise should survive a device disconnect.
+      ws.terminate();
+      const state=await Promise.race([
+        pending, new Promise<"close-not-settled">(resolve=>
+          originalTimeout(()=>resolve("close-not-settled"),350))
+      ]);
+      assert.equal(state,null,"closed device must settle a pending Cloud read");
+      resolveSecond(false);
+    }
     assert.equal(checks,2);
-    assert.equal(await closed,1008,"expired result must close without acknowledging the read");
+    assert.equal(await closed,scenario==="disconnected-grant"?1006:1008,
+      "expired or disconnected read must close without an ACK");
     assert.equal(ackDelivered,false,"never acknowledge an expired metadata response");
   }finally{
     Date.now=originalNow;
+    globalThis.setTimeout=originalTimeout;
+    resolveSecond(false);
     ws?.terminate();
     await relay.close();
     await new Promise<void>(resolve=>http.close(()=>resolve()));
   }
 });
+}
