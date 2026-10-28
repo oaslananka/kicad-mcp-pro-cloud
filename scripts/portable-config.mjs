@@ -1,4 +1,4 @@
-import {createHmac} from "node:crypto";
+import {createHmac,scryptSync} from "node:crypto";
 // Read public deployment selectors from Doppler-injected environment.
 // Never print the full environment, access tokens or credential-bearing URLs.
 const origin=process.env.PUBLIC_ORIGIN??"";
@@ -70,11 +70,17 @@ else if(kind==="google"){
     // Use the production-random Better Auth root secret as the HMAC key.
     // Explicitly enumerated selectors only: dynamic environment property
     // access would expand the trusted input surface for this check.
+    // A database password needs memory-hard derivation, not a fast
+    // SHA/HMAC password hash. The random Better Auth root is used as the
+    // non-public salt; the intermediate key never leaves this process.
+    const databasePasswordTag=scryptSync(
+      process.env.KICAD_DB_PASSWORD,process.env.BETTER_AUTH_SECRET,32
+    ).toString("hex");
     const values=[
       ["PUBLIC_ORIGIN",origin],
       ["OAUTH_ISSUER",issuer],["OAUTH_JWKS_URL",jwks],
       ["OAUTH_AUDIENCE",audience],
-      ["KICAD_DB_PASSWORD",process.env.KICAD_DB_PASSWORD??null],
+      ["KICAD_DB_PASSWORD_SCRYPT",databasePasswordTag],
       ["AUTH_MODE",auth],
       ["BETTER_AUTH_SECRET",process.env.BETTER_AUTH_SECRET??null],
       ["GITHUB_CLIENT_ID",githubId],["GITHUB_CLIENT_SECRET",githubSecret],
