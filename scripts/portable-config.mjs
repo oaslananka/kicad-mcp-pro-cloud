@@ -31,7 +31,9 @@ else if(kind==="google"){
   // externally provisioned identity system. Legacy production can continue
   // using AUTH_MODE=external; only this fresh-install validator is strict.
   const auth=process.env.AUTH_MODE??"";
-  if(auth!=="builtin")throw new Error("NEW_VPS_REQUIRES_BUILTIN_AUTH");
+  const allowedBootstrapAuthModes=new Set(["builtin"]);
+  if(!allowedBootstrapAuthModes.has(auth))
+    throw new Error("NEW_VPS_REQUIRES_BUILTIN_AUTH");
   const issuer=process.env.OAUTH_ISSUER??"",jwks=process.env.OAUTH_JWKS_URL??"";
   const audience=process.env.OAUTH_AUDIENCE??"";
   if(audience!==origin+"/mcp")throw new Error("OAUTH_AUDIENCE_MISMATCH");
