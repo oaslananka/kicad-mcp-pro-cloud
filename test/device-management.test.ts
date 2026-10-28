@@ -66,3 +66,45 @@ test("device owner revocation atomically removes credentials, sessions and proje
     assert.equal((await manager.list(owner))[0]?.enabled,true); // unrelated flag cannot revive revoked key
   });
 });
+
+test("only owner enables an unrevoked enrolled device and registers a read-only metadata project",
+  {skip:!process.env.TEST_DATABASE_URL},async()=>{
+  await inIsolatedDatabase(process.env.TEST_DATABASE_URL!,[
+    "001_inventory.pgsql","002_client_grants.pgsql","007_device_pairing.pgsql",
+    "008_device_credentials.pgsql","009_device_handshake.pgsql","010_connector_sessions.pgsql"
+  ],async db=>{
+    const owner="owner-device-activation",other="not-owner";
+    const key=generateKeyPairSync("ed25519");
+    const pairing=new PgPairingChallenges(db,randomBytes(32));
+    const issued=await pairing.issue("Activation fixture",
+      key.publicKey.export({format:"der",type:"spki"}) as Buffer);
+    assert.equal(await pairing.review(issued.id,owner,issued.userCode,"approve"),"approved");
+    const enrollment=await pairing.enroll(issued.id,issued.deviceCode,
+      sign(null,redemptionProof(issued.id,issued.deviceCode),key.privateKey));
+    assert.equal(enrollment.kind,"enrolled");
+    if(enrollment.kind!=="enrolled")return;
+    const device=enrollment.deviceId;
+    const manager=new PgDeviceManagement(db);
+    assert.equal((await manager.list(owner))[0].enabled,false);
+    assert.equal(await manager.createProject(owner,device,"PCB Fixture"),null);
+    assert.equal(await manager.enableDevice(other,device),false);
+    assert.equal(await manager.enableDevice(owner,device),true);
+    assert.equal((await manager.list(owner))[0].enabled,true);
+    assert.equal(await manager.createProject(other,device,"Not Owned"),null);
+    assert.equal(await manager.createProject(owner,device,"../invalid"),null);
+    const project=await manager.createProject(owner,device,"PCB Fixture");
+    assert.ok(project);
+    assert.deepEqual(await manager.listProjects(other),[]);
+    assert.deepEqual(await manager.listProjects(owner),[{
+      id:project,deviceId:device,alias:"PCB Fixture",enabled:true
+    }]);
+    const inDb=await db.query("SELECT max_mode FROM projects WHERE id=$1",[project]);
+    assert.equal(inDb.rows[0].max_mode,"readonly");
+    assert.equal((await db.query("SELECT count(*)::integer AS n FROM project_client_grants "+
+      "WHERE project_id=$1",[project])).rows[0].n,0);
+    assert.equal(await manager.revokeDevice(owner,device),true);
+    assert.equal(await manager.enableDevice(owner,device),false);
+    assert.equal(await manager.createProject(owner,device,"After Revocation"),null);
+    assert.equal((await manager.listProjects(owner))[0].enabled,false);
+  });
+});

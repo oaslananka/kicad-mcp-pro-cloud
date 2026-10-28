@@ -4,7 +4,8 @@ import type {BrowserIdentity} from "./browser.js";
 import type {PgDeviceManagement} from "./device-management.js";
 import {renderDevicesPage} from "./devices-ui.js";
 
-export type DeviceManagementPort=Pick<PgDeviceManagement,"list"|"revokeDevice">;
+export type DeviceManagementPort=Pick<PgDeviceManagement,"list"|"revokeDevice"> &
+  Partial<Pick<PgDeviceManagement,"enableDevice"|"createProject"|"listProjects">>;
 const FIVE_MINUTES=300_000;
 const DEVICE_ID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 function cookieName(origin:string):string{
@@ -20,8 +21,10 @@ function readCookie(req:Request,origin:string):string|null{
     .find(x=>x.startsWith(name+"="))?.slice(name.length+1)??null;
 }
 function reply(status:number,devices:Parameters<typeof renderDevicesPage>[0]=[],
-  message?:string,stateCookie?:string,enrollmentAvailable=true):Response{
-  const response=new Response(renderDevicesPage(devices,message,enrollmentAvailable),{status,headers:{
+  message?:string,stateCookie?:string,enrollmentAvailable=true,
+  projects:ReadonlyArray<{id:string;deviceId:string;alias:string;enabled:boolean}>=[],
+  ownerSub?:string):Response{
+  const response=new Response(renderDevicesPage(devices,message,enrollmentAvailable,projects,ownerSub),{status,headers:{
     "Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store",
     "Referrer-Policy":"no-referrer","X-Content-Type-Options":"nosniff",
     "Content-Security-Policy":"default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'"
@@ -41,15 +44,18 @@ function userOf(session:Awaited<ReturnType<NonNullable<BrowserIdentity["api"]>["
   if(!session?.user?.id||!session.session?.id)return null;
   return {user:session.user.id,session:session.session.id};
 }
-async function signature(secret:string,user:string,session:string,deviceId:string,stamp:string,nonce:string){
-  const value=JSON.stringify(["device-revoke-v1",user,session,deviceId,stamp,nonce]);
+async function signature(secret:string,user:string,session:string,deviceId:string,stamp:string,nonce:string,
+  purpose="device-revoke-v1"){
+  const value=JSON.stringify([purpose,user,session,deviceId,stamp,nonce]);
   return Buffer.from(await makeSignature(value,secret),"base64").toString("base64url");
 }
-async function csrf(secret:string,user:string,session:string,deviceId:string,stamp:string,nonce:string){
-  return stamp+"."+nonce+"."+(await signature(secret,user,session,deviceId,stamp,nonce));
+async function csrf(secret:string,user:string,session:string,deviceId:string,stamp:string,nonce:string,
+  purpose="device-revoke-v1"){
+  return stamp+"."+nonce+"."+(await signature(secret,user,session,deviceId,stamp,nonce,purpose));
 }
 async function checkCsrf(req:Request,origin:string,secret:string,
-  owner:{user:string;session:string},id:string,sent:string):Promise<boolean>{
+  owner:{user:string;session:string},id:string,sent:string,
+  purpose="device-revoke-v1"):Promise<boolean>{
   if(sent.length>250||!readCookie(req,origin))return false;
   const [stamp,nonce,sig,...rest]=sent.split(".");
   if(rest.length||!/^\d{13}$/.test(stamp)||
@@ -57,7 +63,7 @@ async function checkCsrf(req:Request,origin:string,secret:string,
   if(readCookie(req,origin)!==stamp+"."+nonce)return false;
   const now=Date.now(),created=Number(stamp);
   if(created>now+5000||now-created>FIVE_MINUTES)return false;
-  const a=Buffer.from(await signature(secret,owner.user,owner.session,id,stamp,nonce));
+  const a=Buffer.from(await signature(secret,owner.user,owner.session,id,stamp,nonce,purpose));
   const b=Buffer.from(sig);
   return a.length===b.length&&timingSafeEqual(a,b);
 }
@@ -77,10 +83,18 @@ async function list(req:Request,identity:BrowserIdentity,origin:string,
   const {secret}=await identity.$context;
   const stamp=String(Date.now()),nonce=randomBytes(16).toString("base64url");
   const rows=await Promise.all(list.map(async d=>({...d,
-    csrf:await csrf(secret,who.user,who.session,d.id,stamp,nonce)})));
+    csrf:await csrf(secret,who.user,who.session,d.id,stamp,nonce),
+    enableCsrf:devices.enableDevice?
+      await csrf(secret,who.user,who.session,d.id,stamp,nonce,"device-enable-v1"):undefined,
+    projectCsrf:devices.createProject?
+      await csrf(secret,who.user,who.session,d.id,stamp,nonce,"project-create-v1"):undefined
+  })));
   const note=new URL(req.url).searchParams.has("revoked")?
     "Device key revoked; its sessions and associated project/client permissions were disabled.":undefined;
-  return reply(200,rows,note,cookie(stamp+"."+nonce,origin,300),enrollmentAvailable);
+  const projects=enrollmentAvailable&&devices.listProjects?
+    await devices.listProjects(who.user):[];
+  return reply(200,rows,note,cookie(stamp+"."+nonce,origin,300),
+    enrollmentAvailable,projects,who.user);
 }
 async function revoke(req:Request,identity:BrowserIdentity,origin:string,
   devices:DeviceManagementPort):Promise<Response>{
@@ -108,13 +122,54 @@ async function revoke(req:Request,identity:BrowserIdentity,origin:string,
     "Set-Cookie":cookie("",origin,0)
   }});
 }
+async function activate(req:Request,identity:BrowserIdentity,origin:string,
+  devices:DeviceManagementPort,action:"device-enable-v1"|"project-create-v1"):Promise<Response>{
+  if(!identity.api||!identity.$context)return error(503);
+  if(req.headers.get("origin")!==origin)return error(403);
+  if(req.headers.get("content-type")?.split(";")[0].trim()!=="application/x-www-form-urlencoded")
+    return error(415);
+  const raw=await req.text();
+  if(raw.length>2048)return error(413);
+  const fields=new URLSearchParams(raw);
+  const expected=action==="device-enable-v1"?["device_id","csrf"]:
+    ["device_id","csrf","alias"];
+  if([...fields.keys()].length!==expected.length||
+    expected.some(name=>fields.getAll(name).length!==1))return error(400);
+  const id=fields.get("device_id")??"",proof=fields.get("csrf")??"";
+  if(!DEVICE_ID.test(id))return error(400);
+  const who=userOf(await identity.api.getSession({headers:req.headers}));
+  if(!who)return error(401);
+  const {secret}=await identity.$context;
+  if(!await checkCsrf(req,origin,secret,who,id,proof,action))return error(403);
+  let success=false;
+  try{
+    if(action==="device-enable-v1"){
+      success=!!await devices.enableDevice?.(who.user,id);
+    }else{
+      const alias=fields.get("alias")??"";
+      if(!/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/.test(alias))return error(400);
+      success=!!await devices.createProject?.(who.user,id,alias);
+    }
+  }catch{return error(503);}
+  if(!success)return error(404);
+  return new Response(null,{status:303,headers:{
+    Location:"/devices", "Cache-Control":"no-store",
+    "Set-Cookie":cookie("",origin,0)
+  }});
+}
+
 /** Authenticated browser-only management, never usable in external auth mode. */
 export async function devicesResponse(req:Request,identity:BrowserIdentity,origin:string,
   devices?:DeviceManagementPort,enrollmentAvailable=true):Promise<Response|null>{
   const path=new URL(req.url).pathname;
-  if(path!=="/devices"&&path!=="/devices/revoke")return null;
+  if(!["/devices","/devices/revoke","/devices/enable","/devices/projects/create"].includes(path))
+    return null;
   if(!devices)return error(503);
   if(path==="/devices"&&req.method==="GET")return list(req,identity,origin,devices,enrollmentAvailable);
   if(path==="/devices/revoke"&&req.method==="POST")return revoke(req,identity,origin,devices);
+  if(enrollmentAvailable && req.method==="POST"){
+    if(path==="/devices/enable")return activate(req,identity,origin,devices,"device-enable-v1");
+    if(path==="/devices/projects/create")return activate(req,identity,origin,devices,"project-create-v1");
+  }
   return error(405);
 }
