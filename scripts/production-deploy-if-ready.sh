@@ -15,8 +15,10 @@ flock -n 9 || { echo 'Previous deployment still active; skipping'; exit 0; }
 
 target=$(git ls-remote origin refs/heads/main | awk '{print $1}')
 [[ $target =~ ^[a-f0-9]{40}$ ]] || { echo 'Main SHA unavailable'; exit 1; }
+public_origin=$(scripts/doppler-runtime.sh node scripts/portable-config.mjs origin)
+expected_google=$(scripts/doppler-runtime.sh node scripts/portable-config.mjs google)
 current=$(curl --fail --silent --show-error --max-time 10 \
-  https://kicad-mcp-pro.oaslananka.dev/health | \
+  "$public_origin/health" | \
   python3 -c 'import json,sys; print(json.load(sys.stdin).get("revision","unknown"))' || echo unavailable)
 [[ "$current" == "$target" ]] && { echo "Already deployed $target"; exit 0; }
 
@@ -56,12 +58,12 @@ docker build --pull=false --build-arg "APP_REVISION=$target" \
 restore() {
   echo 'Deployment verification failed. Restoring previous application image.' >&2
   docker image tag "$old" kicad-mcp-pro-cloud:production
-  doppler run -p kicad-mcp-pro -c prd_cloud -- \
+  scripts/doppler-runtime.sh \
     docker compose -f infra/compose.production.yml up -d --no-deps --force-recreate app
 }
 docker image tag "$old" kicad-mcp-pro-cloud:rollback
 docker image tag kicad-mcp-pro-cloud:candidate kicad-mcp-pro-cloud:production
-if ! doppler run -p kicad-mcp-pro -c prd_cloud -- \
+if ! scripts/doppler-runtime.sh \
   docker compose -f infra/compose.production.yml up -d --no-deps --force-recreate app; then
   restore; exit 1
 fi
@@ -72,7 +74,7 @@ for attempt in $(seq 1 25); do
   echo "Waiting for app health ($attempt/25): $status"
   sleep 3
 done
-if [[ "$healthy" != true ]] || ! EXPECTED_REVISION="$target" node scripts/production-smoke.mjs; then
+if [[ "$healthy" != true ]] || ! PUBLIC_ORIGIN="$public_origin" EXPECTED_GOOGLE_OAUTH="$expected_google" EXPECTED_REVISION="$target" node scripts/production-smoke.mjs; then
   restore; exit 1
 fi
 # Keep only active + one rollback tag; never prune unrelated applications.

@@ -1,5 +1,13 @@
 # Doppler-only runtime configuration policy (2026-10-26)
 
+**Current deployment (2026-10-28):** The production baseline is deployed,
+with GitHub login and ChatGPT OAuth accepted; device pairing and KiCad
+execution remain disabled. Some older historical paragraphs below describe
+previous gates before the actual deployment. For new VPS/domain configuration
+and the exact GitHub/VPS bootstrap credential boundary, use
+[Portable Doppler-first deployment](../infra/PORTABLE-DEPLOY.md).
+
+
 ## Source of truth
 
 Doppler project: kicad-mcp-pro-cloud. The UI currently shows a main config.
