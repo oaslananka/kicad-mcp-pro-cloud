@@ -1,4 +1,4 @@
-import {createHmac,scryptSync} from "node:crypto";
+import {scryptSync} from "node:crypto";
 // Read public deployment selectors from Doppler-injected environment.
 // Never print the full environment, access tokens or credential-bearing URLs.
 const origin=process.env.PUBLIC_ORIGIN??"";
@@ -65,22 +65,16 @@ else if(kind==="google"){
   if(process.env.PAIRING_DEVICE_API_ENABLED==="true"||process.env.CONNECTOR_WS_ENABLED==="true")
     throw new Error("DEVICE_ROLLOUT_REQUIRES_SEPARATE_SECURITY_ACCEPTANCE");
   if(kind==="fingerprint"){
-    // No raw credentials are emitted or persisted. Keyed HMAC makes this a
-    // change detector, not a standalone hash of guessable client IDs.
-    // Use the production-random Better Auth root secret as the HMAC key.
-    // Explicitly enumerated selectors only: dynamic environment property
-    // access would expand the trusted input surface for this check.
-    // A database password needs memory-hard derivation, not a fast
-    // SHA/HMAC password hash. The random Better Auth root is used as the
-    // non-public salt; the intermediate key never leaves this process.
-    const databasePasswordTag=scryptSync(
-      process.env.KICAD_DB_PASSWORD,process.env.BETTER_AUTH_SECRET,32
-    ).toString("hex");
+    // No raw credentials are emitted or persisted. Derive the entire config
+    // fingerprint directly with memory-hard scrypt, not with a fast hash of
+    // a password-bearing record. The production-random Better Auth root is
+    // the private salt; all inputs stay inside this short-lived process.
+    // Keep every eligible environment field explicitly enumerated.
     const values=[
       ["PUBLIC_ORIGIN",origin],
       ["OAUTH_ISSUER",issuer],["OAUTH_JWKS_URL",jwks],
       ["OAUTH_AUDIENCE",audience],
-      ["KICAD_DB_PASSWORD_SCRYPT",databasePasswordTag],
+      ["KICAD_DB_PASSWORD",process.env.KICAD_DB_PASSWORD??null],
       ["AUTH_MODE",auth],
       ["BETTER_AUTH_SECRET",process.env.BETTER_AUTH_SECRET??null],
       ["GITHUB_CLIENT_ID",githubId],["GITHUB_CLIENT_SECRET",githubSecret],
@@ -92,8 +86,9 @@ else if(kind==="google"){
       ["PAIRING_DEVICE_API_ENABLED",process.env.PAIRING_DEVICE_API_ENABLED??null],
       ["CONNECTOR_WS_ENABLED",process.env.CONNECTOR_WS_ENABLED??null]
     ];
-    const digest=createHmac("sha256",process.env.BETTER_AUTH_SECRET)
-      .update(JSON.stringify(values)).digest("hex");
+    const digest=scryptSync(
+      JSON.stringify(values),process.env.BETTER_AUTH_SECRET,32
+    ).toString("hex");
     process.stdout.write(digest+"\n");
   }else{
     process.stdout.write("Portable runtime configuration valid (secrets not printed)\n");
