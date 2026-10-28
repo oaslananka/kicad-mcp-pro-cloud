@@ -62,21 +62,33 @@ function validOrigin(req: IncomingMessage, config: Config): boolean {
     (origin === config.publicOrigin || config.allowedOrigins.includes(origin)));
 }
 
-export function createHttpServer(config: Config, inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">,devices?:DeviceManagementPort,pairings?:PairingReviewPort,pairingDevice?:PairingDevicePort,deviceSource?:RequestSourceResolver,
-  summaryRelay?:()=>SummaryRelay|null): Server {
-  return createServer((req, res) => {
-    void handleRequest(req, res, config, inventory, verify, grants, identity,devices,pairings,pairingDevice,deviceSource,summaryRelay).catch(() => {
-      if (!res.headersSent) deny(res, 500, "internal_error");
+export type CloudHttpServices={
+  grants?:GrantManagement;
+  identity?:Pick<Identity,"handler">;
+  devices?:DeviceManagementPort;
+  pairings?:PairingReviewPort;
+  pairingDevice?:PairingDevicePort;
+  deviceSource?:RequestSourceResolver;
+  summaryRelay?:()=>SummaryRelay|null;
+};
+
+/** Named optional services prevent misleading positional dependency wiring. */
+export function createHttpServer(
+  config:Config,inventory:Inventory,verify:Verifier,services:CloudHttpServices={}
+):Server{
+  return createServer((req,res)=>{
+    void handleRequest(req,res,config,inventory,verify,services).catch(()=>{
+      if(!res.headersSent)deny(res,500,"internal_error");
       else res.end();
     });
   });
 }
 
 async function handleRequest(
-  req: IncomingMessage, res: ServerResponse, config: Config,
-  inventory: Inventory, verify: Verifier, grants?: GrantManagement, identity?: Pick<Identity,"handler">,devices?:DeviceManagementPort,pairings?:PairingReviewPort,pairingDevice?:PairingDevicePort,deviceSource?:RequestSourceResolver,
-  summaryRelay?:()=>SummaryRelay|null
-): Promise<void> {
+  req:IncomingMessage,res:ServerResponse,config:Config,inventory:Inventory,
+  verify:Verifier,services:CloudHttpServices
+):Promise<void>{
+    const {grants,identity,devices,pairings,pairingDevice,deviceSource,summaryRelay}=services;
     try {
       const path = new URL(req.url ?? "/", config.publicOrigin).pathname;
       // These GET routes only render the public sign-in form or redirect to it.

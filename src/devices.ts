@@ -21,10 +21,18 @@ function readCookie(req:Request,origin:string):string|null{
   return (req.headers.get("cookie")??"").split(";").map(x=>x.trim())
     .find(x=>x.startsWith(name+"="))?.slice(name.length+1)??null;
 }
-function reply(status:number,devices:Parameters<typeof renderDevicesPage>[0]=[],
-  message?:string,stateCookie?:string,enrollmentAvailable=true,
-  projects:ReadonlyArray<{id:string;deviceId:string;alias:string;enabled:boolean;grantCsrf?:string}>=[],
-  ownerSub?:string,clients:ReadonlyArray<string>=[]):Response{
+type DeviceReply={
+  status:number;
+  devices?:Parameters<typeof renderDevicesPage>[0];
+  message?:string;
+  stateCookie?:string;
+  enrollmentAvailable?:boolean;
+  projects?:ReadonlyArray<{id:string;deviceId:string;alias:string;enabled:boolean;grantCsrf?:string}>;
+  ownerSub?:string;
+  clients?:ReadonlyArray<string>;
+};
+function reply({status,devices=[],message,stateCookie,enrollmentAvailable=true,
+  projects=[],ownerSub,clients=[]}:DeviceReply):Response{
   const response=new Response(renderDevicesPage(devices,message,enrollmentAvailable,projects,ownerSub,clients),{status,headers:{
     "Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store",
     "Referrer-Policy":"no-referrer","X-Content-Type-Options":"nosniff",
@@ -34,7 +42,7 @@ function reply(status:number,devices:Parameters<typeof renderDevicesPage>[0]=[],
   return response;
 }
 function error(status:number):Response{
-  return reply(status,[],"Device management is temporarily unavailable.",undefined,false);
+  return reply({status,message:"Device management is temporarily unavailable.",enrollmentAvailable:false});
 }
 function pendingSchema(error:unknown):boolean{
   return Boolean(error && typeof error==="object" && "code" in error &&
@@ -79,7 +87,7 @@ async function list(req:Request,identity:BrowserIdentity,origin:string,
   catch(cause){
     // Production intentionally remains below device-credential migration 008.
     // Show a clearly disabled page; never claim an empty live inventory.
-    if(pendingSchema(cause))return reply(200,[],undefined,undefined,false);
+    if(pendingSchema(cause))return reply({status:200,enrollmentAvailable:false});
     return error(503);
   }
   const {secret}=await identity.$context;
@@ -112,8 +120,9 @@ async function list(req:Request,identity:BrowserIdentity,origin:string,
       await csrf(secret,who.user,who.session,project.id,stamp,nonce,"project-browser-grant-v1"):
       undefined
   })));
-  return reply(200,rows,note,cookie(stamp+"."+nonce,origin,300),
-    enrollmentAvailable,scoped,who.user,clients);
+  return reply({status:200,devices:rows,message:note,
+    stateCookie:cookie(stamp+"."+nonce,origin,300),enrollmentAvailable,
+    projects:scoped,ownerSub:who.user,clients});
 }
 async function revoke(req:Request,identity:BrowserIdentity,origin:string,
   devices:DeviceManagementPort):Promise<Response>{

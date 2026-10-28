@@ -42,9 +42,7 @@ const deviceSource=(wsEnabled||pairingDeviceEnabled)?
   configuredDeviceSource(process.env):undefined;
 // Lazy binding keeps all read surfaces absent when connector WS is disabled.
 let connectorRelay:ReturnType<typeof attachConnectorWebSocket>|null=null;
-const server=createHttpServer(config,inventory,createVerifier(config),inventory,
-  identity,deviceManagement,pairingReview,pairingDevice,deviceSource,
-  ()=>connectorRelay);
+const server=createHttpServer(config, inventory, createVerifier(config), {grants:inventory, identity:identity, devices:deviceManagement, pairings:pairingReview, pairingDevice:pairingDevice, deviceSource:deviceSource, summaryRelay:()=>connectorRelay});
 const connectorWs=wsEnabled&&connectorPool?attachConnectorWebSocket(server,{
   publicOrigin:config.publicOrigin,
   sourceOf:deviceSource!,

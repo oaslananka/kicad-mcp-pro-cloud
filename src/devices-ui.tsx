@@ -57,7 +57,7 @@ export function renderDevicesPage(
                 <form method="post" action="/devices/projects/grant">
                   <input type="hidden" name="project_id" value={project.id}/>
                   <input type="hidden" name="csrf" value={project.grantCsrf}/>
-                  <label>AI client with existing OAuth consent
+                  <label>AI client with existing OAuth consent{" "}
                     <select name="client_id" required={true}>
                       {clients.map(client=><option value={client} key={client}>{client}</option>)}
                     </select>

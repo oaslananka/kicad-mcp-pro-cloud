@@ -39,7 +39,7 @@ test("real MCP OAuth server: authorize redirect, session consent and PKCE code e
     const conf:Config={host:"127.0.0.1",port:0,publicOrigin,issuer:publicOrigin+"/api/auth",
       jwksUrl:publicOrigin+"/api/auth/jwks",audience:publicOrigin+"/mcp",
       databaseUrl:scoped,allowedOrigins:[],managementClientId:"portal"};
-    server=createHttpServer(conf,grants,async()=>{throw new Error("unexpected resource access")},grants,identity);
+    server=createHttpServer(conf, grants, async()=>{throw new Error("unexpected resource access")}, {grants:grants, identity:identity});
     await new Promise<void>(resolve=>server!.listen(0,"127.0.0.1",resolve));
     const address="http://127.0.0.1:"+(server.address() as AddressInfo).port;
     const now=new Date(),expire=new Date(now.getTime()+60*60*1000);

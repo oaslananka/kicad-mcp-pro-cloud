@@ -55,7 +55,7 @@ async function startServer(server:Server):Promise<{origin:string;close:()=>Promi
   return {origin,close:()=>new Promise(resolve=>server.close(()=>resolve()))};
 }
 test("HTTP device routes are absent without builtin identity",async()=>{
-  const s=await startServer(createHttpServer(config,inventory,async()=>{
+  const s=await startServer(createHttpServer(config, inventory, async()=>{
     throw Error("invalid");
   }));
   try{
@@ -69,9 +69,9 @@ test("HTTP device routes are absent without builtin identity",async()=>{
   }finally{await s.close();}
 });
 test("HTTP device revocation uses verified browser session plus CSRF",async()=>{
-  const s=await startServer(createHttpServer(config,inventory,async()=>{
+  const s=await startServer(createHttpServer(config, inventory, async()=>{
     throw Error("unused");
-  },undefined,identity,devices));
+  }, {identity:identity, devices:devices}));
   try{
     const view=await fetch(s.origin+"/devices");
     assert.equal(view.status,200);
@@ -103,17 +103,17 @@ test("HTTP device revocation uses verified browser session plus CSRF",async()=>{
 
 test("owner device activation and read-only project creation are disabled by default, CSRF scoped",
   async()=>{
-  const disabled=await startServer(createHttpServer(config,inventory,async()=>{
+  const disabled=await startServer(createHttpServer(config, inventory, async()=>{
     throw Error("unused");
-  },undefined,identity,devices));
+  }, {identity:identity, devices:devices}));
   try{
     const denied=await fetch(disabled.origin+"/devices/enable",{
       method:"POST",headers:{Origin:config.publicOrigin},body:""});
     assert.equal(denied.status,405);
   }finally{await disabled.close();}
-  const enabled=await startServer(createHttpServer(config,inventory,async()=>{
+  const enabled=await startServer(createHttpServer(config, inventory, async()=>{
     throw Error("unused");
-  },undefined,identity,devices,undefined,{} as never));
+  }, {identity:identity, devices:devices, pairingDevice:{} as never}));
   try{
     const page=await fetch(enabled.origin+"/devices");
     const html=await page.text();
@@ -169,9 +169,9 @@ test("owner approves only an OAuth-consented AI client's read-only project grant
       return owner==="owner-1"&&client==="ai-fixture";
     }
   };
-  const web=await startServer(createHttpServer(config,inventory,async()=>{
+  const web=await startServer(createHttpServer(config, inventory, async()=>{
     throw Error("unused");
-  },grants,actor,devices,undefined,{} as never));
+  }, {grants:grants, identity:actor, devices:devices, pairingDevice:{} as never}));
   try{
     const page=await fetch(web.origin+"/devices");
     const html=await page.text();

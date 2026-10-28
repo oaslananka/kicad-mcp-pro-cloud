@@ -56,7 +56,7 @@ const config: Config = {
 let server: Server;
 let endpoint: string;
 before(async () => {
-  server = createHttpServer(config, inventory, verify, grants);
+  server = createHttpServer(config, inventory, verify, {grants:grants});
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   endpoint = "http://127.0.0.1:" + (server.address() as AddressInfo).port;
 });
@@ -161,7 +161,7 @@ test("identity routes are proxied only when enabled, preserving response cookies
       });
     }
   };
-  const proxy=createHttpServer(config,inventory,verify,grants,mockIdentity);
+  const proxy=createHttpServer(config, inventory, verify, {grants:grants, identity:mockIdentity});
   await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
   const port=(proxy.address() as AddressInfo).port;
   try {
@@ -213,7 +213,7 @@ test("HTTP consent rejects forged unsigned request even if identity is configure
     $context:Promise.resolve({secret:"test-auth-secret-for-consent"}),
     api:{getSession:async()=>({user:{id:"test-user"}})}
   };
-  const proxy=createHttpServer(config,inventory,verify,grants,mockIdentity as never);
+  const proxy=createHttpServer(config, inventory, verify, {grants:grants, identity:mockIdentity as never});
   await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
   const port=(proxy.address() as AddressInfo).port;
   try{
@@ -237,7 +237,7 @@ test("HTTP connection list requires signed-in session",async()=>{
     api:{getSession:async()=>null},
     $context:Promise.resolve({secret:"test-only-not-a-production-secret"})
   };
-  const proxy=createHttpServer(config,inventory,verify,grants,mockIdentity as never);
+  const proxy=createHttpServer(config, inventory, verify, {grants:grants, identity:mockIdentity as never});
   await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
   try {
     const port=(proxy.address() as AddressInfo).port;
@@ -299,8 +299,7 @@ test("Cloud read route is absent without connector and validates OAuth and paylo
       requestId:id,projectId,operation:"project_summary" as const,
       files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
   }};
-  const proxy=createHttpServer(config,inventory,verify,grants,
-    undefined,undefined,undefined,undefined,undefined,()=>mockRelay);
+  const proxy=createHttpServer(config, inventory, verify, {grants:grants, summaryRelay:()=>mockRelay});
   await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
   const origin="http://127.0.0.1:"+(proxy.address() as AddressInfo).port;
   try{

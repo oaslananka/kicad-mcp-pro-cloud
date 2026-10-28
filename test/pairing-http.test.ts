@@ -26,8 +26,7 @@ test("pairing browser route only exists behind built-in identity",async()=>{
   const responses:number[]=[];
   for(const enabled of [false,true]){
     const stub:PairingReviewPort={review:async()=> "unavailable"};
-    const server=createHttpServer(config,inventory,async()=>{throw Error("unused");},
-      undefined,enabled?identity:undefined,undefined,enabled?stub:undefined);
+    const server=createHttpServer(config, inventory, async()=>{throw Error("unused");}, {identity:enabled?identity:undefined, pairings:enabled?stub:undefined});
     await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
     try{
       const port=(server.address() as AddressInfo).port;

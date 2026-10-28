@@ -29,7 +29,7 @@ async function listener(server:Server){
   };
 }
 test("device endpoints are absent unless separately wired",async()=>{
-  const server=createHttpServer(config,inventory,async()=>{throw Error("not called");});
+  const server=createHttpServer(config, inventory, async()=>{throw Error("not called");});
   const l=await listener(server);
   try{
     for(const path of ["/challenge","/redeem"]){
@@ -58,8 +58,7 @@ test("strict device-only HTTP denies browser, spoofed identity and oversized tra
         ownerSub:"owner",deviceFingerprint:"a".repeat(64)}};
     }
   };
-  const server=createHttpServer(config,inventory,async()=>{throw Error("not called");},
-    undefined,undefined,undefined,undefined,api,req=>req.socket.remoteAddress??null);
+  const server=createHttpServer(config, inventory, async()=>{throw Error("not called");}, {pairingDevice:api, deviceSource:req=>req.socket.remoteAddress??null});
   const l=await listener(server),issue=l.origin+"/api/v1/pairing/device/challenge";
   const good=JSON.stringify({alias:"KiCad Test",publicKeyDer:key.toString("base64")});
   try{
@@ -114,8 +113,7 @@ test("redemption rejects incorrect signature and code encoding before store",asy
     issue:async()=>({kind:"unavailable"}),
     enroll:async()=>{called=true;return {kind:"unavailable"};}
   };
-  const server=createHttpServer(config,inventory,async()=>{throw Error("not called");},
-    undefined,undefined,undefined,undefined,api,req=>req.socket.remoteAddress??null);
+  const server=createHttpServer(config, inventory, async()=>{throw Error("not called");}, {pairingDevice:api, deviceSource:req=>req.socket.remoteAddress??null});
   const l=await listener(server);
   try{
     const base=l.origin+"/api/v1/pairing/device/redeem";
