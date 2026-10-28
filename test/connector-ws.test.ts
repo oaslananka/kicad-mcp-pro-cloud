@@ -3,6 +3,7 @@ import {generateKeyPairSync,randomBytes,sign} from "node:crypto";
 import {createServer} from "node:http";
 import type {AddressInfo} from "node:net";
 import {test} from "node:test";
+import type {Pool} from "pg";
 import {WebSocket} from "ws";
 import {inIsolatedDatabase} from "./isolated-db.js";
 import {PgPairingChallenges} from "../src/pairing-store.js";
@@ -60,6 +61,20 @@ function field(obj:Record<string,unknown>,key:string):string{
   return obj[key] as string;
 }
 
+async function startFixtureServer(db:Pool){
+  const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
+  await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+  const port=(server.address() as AddressInfo).port;
+  const attached=attachConnectorWebSocket(server,{
+    publicOrigin:"http://127.0.0.1:"+port,
+    sourceOf:()=>"127.0.0.1",
+    proofs:new PgDeviceHandshakes(db),
+    connections:new BoundConnectorConnections(
+      new PgConnectorSessions(db),new PgConnectorReadGate(db))
+  });
+  return {server,port,attached};
+}
+
 test("outbound local WebSocket proves enrolled device identity then binds signed session",
   {skip:!url,timeout:60_000},async()=>{
   await inIsolatedDatabase(url!,migrations,async db=>{
@@ -76,17 +91,7 @@ test("outbound local WebSocket proves enrolled device identity then binds signed
     const device=enrolled.deviceId;
     // Only a fixture. No public enablement endpoint exists.
     await db.query("UPDATE devices SET enabled=true WHERE id=$1",[device]);
-    const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
-    await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
-    const port=(server.address() as AddressInfo).port;
-    const origin="http://127.0.0.1:"+port;
-    const attached=attachConnectorWebSocket(server,{
-      publicOrigin:origin,
-      sourceOf:()=> "127.0.0.1",
-      proofs:new PgDeviceHandshakes(db),
-      connections:new BoundConnectorConnections(
-        new PgConnectorSessions(db),new PgConnectorReadGate(db))
-    });
+    const {server,port,attached}=await startFixtureServer(db);
     let ws:WebSocket|undefined;
     try{
       // Browser-origin and query-string upgrade attempts must fail.
@@ -145,16 +150,7 @@ test("invalid device signature never starts an authenticated connector session",
     assert.equal(enrolled.kind,"enrolled");
     if(enrolled.kind!=="enrolled")return;
     await db.query("UPDATE devices SET enabled=true WHERE id=$1",[enrolled.deviceId]);
-    const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
-    await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
-    const port=(server.address() as AddressInfo).port;
-    const attached=attachConnectorWebSocket(server,{
-      publicOrigin:"http://127.0.0.1:"+port,
-      sourceOf:()=> "127.0.0.1",
-      proofs:new PgDeviceHandshakes(db),
-      connections:new BoundConnectorConnections(
-        new PgConnectorSessions(db),new PgConnectorReadGate(db))
-    });
+    const {server,port,attached}=await startFixtureServer(db);
     let ws:WebSocket|undefined;
     try{
       ws=await connect("ws://127.0.0.1:"+port+"/api/v1/connector/ws");
@@ -198,16 +194,7 @@ test("authenticated Cloud socket relays one owner-granted metadata read and chec
         "VALUES($1,$2,$3,'Fixture',true,'readonly')",[project,owner,device]);
       await db.query("INSERT INTO project_client_grants(project_id,owner_sub,client_id,enabled,max_mode) "+
         "VALUES($1,$2,$3,true,'readonly')",[project,owner,clientId]);
-      const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
-      await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
-      const port=(server.address() as AddressInfo).port;
-      const attached=attachConnectorWebSocket(server,{
-        publicOrigin:"http://127.0.0.1:"+port,
-        sourceOf:()=>"127.0.0.1",
-        proofs:new PgDeviceHandshakes(db),
-        connections:new BoundConnectorConnections(
-          new PgConnectorSessions(db),new PgConnectorReadGate(db))
-      });
+      const {server,port,attached}=await startFixtureServer(db);
       let ws:WebSocket|undefined;
       try{
         ws=await connect("ws://127.0.0.1:"+port+"/api/v1/connector/ws");
