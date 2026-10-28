@@ -300,6 +300,13 @@ async function handleRequest(
         // check immediately before constructing the HTTP response.
         try{await verify(matched[1]);}
         catch{deny(res,403,"forbidden");return;}
+        // The final project lookup also awaits PostgreSQL. A client token
+        // may be revoked while that query is in flight even when its JWT
+        // signature and expiration are still valid. Check the cutoff at
+        // the final response authorization point as well.
+        if(!await inventory.isAccessTokenAllowed(actor.sub,actor.clientId,actor.issuedAt)){
+          deny(res,403,"forbidden");return;
+        }
         json(res,200,result);return;
       }
       if (path !== "/mcp") {

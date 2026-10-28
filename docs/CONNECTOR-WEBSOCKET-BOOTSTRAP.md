@@ -88,6 +88,17 @@ with metadata, the corrected response is 403 with no presence fields.
 This final check narrows the read-to-response race but does not claim
 atomicity across HTTP serialization, PostgreSQL and external revocation.
 
+
+**Token cutoff revocation during that same lookup:** A token need not
+expire to lose authorization. A client-token cutoff may be committed while
+the final asynchronous project lookup is in progress, after the previous
+cutoff check. Cloud now queries `isAccessTokenAllowed` once more after
+that final project lookup and JWT verification, before writing presence
+metadata. The localhost HTTP regression demonstrates that a token revoked
+during `getProject` previously received HTTP 200 and now receives 403.
+This is a final checked authorization boundary, not an atomic revocation
+barrier across a future network write.
+
 The regression `test/connector-deadline-after-authorization.test.ts`
 simulates a previously authorized, real localhost WebSocket read whose
 database grant check completes after the signed deadline: it must return

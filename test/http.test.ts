@@ -373,6 +373,51 @@ test("Cloud HTTP read denies token expiry during the final awaited project looku
   }
 });
 
+test("Cloud HTTP read denies token revocation during the final project lookup",async()=>{
+  let tokenActive=true;
+  let cutoffChecks=0;
+  let projectChecks=0;
+  const boundedInventory:Inventory={
+    ...inventory,
+    async isAccessTokenAllowed(){
+      cutoffChecks++;
+      return tokenActive;
+    },
+    async getProject(owner,clientId,projectId){
+      projectChecks++;
+      const project=await inventory.getProject(owner,clientId,projectId);
+      // Model revocation committed while the last project query awaited
+      // the database, after the previous cutoff check succeeded.
+      tokenActive=false;
+      return project;
+    }
+  };
+  const relay={
+    async requestSummary(_actor:unknown,_device:string,projectId:string){
+      return {kind:"connector.local_read_preview" as const,version:1 as const,
+        requestId:id,projectId,operation:"project_summary" as const,
+        files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
+    }
+  };
+  const proxy=createHttpServer(config,boundedInventory,verify,{summaryRelay:()=>relay});
+  await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
+  try{
+    const port=(proxy.address() as AddressInfo).port;
+    const result=await fetch("http://127.0.0.1:"+port+"/api/v1/connector/project-summary",{
+      method:"POST",headers:headers(),
+      body:JSON.stringify({deviceId:mockProject.deviceId,projectId:id})
+    });
+    assert.equal(result.status,403,
+      "revocation completed during final project lookup must deny presence data");
+    assert.deepEqual(await result.json(),{error:"forbidden"});
+    assert.equal(projectChecks,1);
+    assert.equal(cutoffChecks,3,
+      "final project lookup must be followed by a new cutoff check");
+  }finally{
+    await new Promise<void>(resolve=>proxy.close(()=>resolve()));
+  }
+});
+
 test("Cloud read route is absent without connector and validates OAuth and payload when attached",async()=>{
   const path="/api/v1/connector/project-summary";
   const validBody=JSON.stringify({deviceId:mockProject.deviceId,projectId:id});
