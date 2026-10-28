@@ -26,7 +26,8 @@ function nextFrame(ws:WebSocket):Promise<Record<string,unknown>>{
 }
 
 for(const scenario of ["expired-deadline","stalled-grant",
-  "disconnected-grant","stalled-preflight","disconnected-preflight"] as const){
+  "disconnected-grant","stalled-preflight","disconnected-preflight",
+  "rejected-preflight","rejected-final-grant"] as const){
 test(scenario==="expired-deadline" ?
   "a result finishing its async grant check after request deadline is never delivered" :
   scenario==="stalled-grant" ?
@@ -35,7 +36,11 @@ test(scenario==="expired-deadline" ?
   "closed WebSocket releases HTTP wait even if final DB check is pending" :
   scenario==="stalled-preflight" ?
   "initial DB grant stall cannot hold an HTTP read forever" :
-  "closed WebSocket releases HTTP wait during the initial DB grant",
+  scenario==="disconnected-preflight" ?
+  "closed WebSocket releases HTTP wait during the initial DB grant" :
+  scenario==="rejected-preflight" ?
+  "rejected initial DB grant fails closed without read dispatch" :
+  "rejected final DB grant never ACKs or releases read metadata",
   {timeout:12_000},async()=>{
   const owner="synthetic-owner",device=randomUUID(),project=randomUUID();
   const session=randomUUID(),challenge=randomUUID();
@@ -56,9 +61,13 @@ test(scenario==="expired-deadline" ?
     activate:async()=>true,
     authorizeOutgoingSummary:async()=>{
       checks++;
+      if(scenario==="rejected-preflight"&&checks===1)
+        throw Error("synthetic DB authorization rejection");
       if(checks===1 && scenario!=="stalled-preflight" &&
          scenario!=="disconnected-preflight")return true;
       signalSecond();
+      if(scenario==="rejected-final-grant")
+        throw Error("synthetic final DB authorization rejection");
       return delayedSecond;
     },
     disconnect:async()=>{}
@@ -91,7 +100,8 @@ test(scenario==="expired-deadline" ?
       signature:Buffer.alloc(64,4).toString("base64url")}));
     assert.equal((await next).kind,"connector.ready");
 
-    if(scenario==="stalled-preflight"||scenario==="disconnected-preflight"){
+    if(scenario==="stalled-preflight"||
+       scenario==="disconnected-preflight"||scenario==="rejected-preflight"){
       let requestSent=false;
       ws.on("message",()=>{requestSent=true;});
       const closed=new Promise<number>(resolve=>ws!.once("close",resolve));
@@ -105,13 +115,14 @@ test(scenario==="expired-deadline" ?
         clientId:"synthetic-client",
         accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)},device,project);
       globalThis.setTimeout=originalTimeout;
-      await secondStarted;
+      if(scenario!=="rejected-preflight")await secondStarted;
       if(scenario==="disconnected-preflight")ws.terminate();
       const outcome=await Promise.race([
-        preflight,new Promise<"preflight-not-bounded">(resolve=>
+        preflight.then(value=>value,()=> "preflight-rejected" as const),
+        new Promise<"preflight-not-bounded">(resolve=>
           originalTimeout(()=>resolve("preflight-not-bounded"),350))
       ]);
-      assert.equal(outcome,null,"preflight must stop without sending a read");
+      assert.equal(outcome,null,"preflight must fail closed without read dispatch");
       assert.equal(requestSent,false,"preflight failure must not dispatch a read");
       assert.equal(await closed,scenario==="disconnected-preflight"?1006:1008,
         "failed preflight must close device session");
@@ -152,6 +163,9 @@ test(scenario==="expired-deadline" ?
       resolveSecond(true);
       assert.equal(await pending,null,
         "an approved result that outlives its signed deadline must be discarded");
+    }else if(scenario==="rejected-final-grant"){
+      assert.equal(await pending,null,
+        "final DB authorization failures must be denied before ACK");
     }else if(scenario==="stalled-grant"){
       // The final database grant can hang: the independent request budget
       // must complete with null without ever waiting for DB resolution.

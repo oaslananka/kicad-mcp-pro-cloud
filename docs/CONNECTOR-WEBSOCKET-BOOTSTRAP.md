@@ -113,6 +113,21 @@ the subsequent one-shot read and final revalidation. Real DB queries
 may continue server-side after their caller times out; database-level
 query timeouts remain an independent operational control.
 
+**Database authorization failure is a denial, not a live socket:**
+The initial `authorizeOutgoingSummary` may **reject** because of
+a transient PostgreSQL error, in addition to returning false or
+timing out. Previously that exception escaped `requestSummary`
+and could strand a ready but single-use-reserved device session.
+The initial grant now catches the rejection, returns `null` and
+closes the authenticated socket with policy 1008 **without issuing
+`connector.authorized_read`**. An isolated real localhost WS
+RED-before-GREEN regression verifies the no-read, no-HTTP-result
+behavior. A separate regression verifies that a rejected **final**
+grant also settles the HTTP promise with `null`, closes the socket
+and sends no `connector.read_ack` or project-presence metadata.
+Neither test requires a real OAuth user or production database;
+full synthetic DB acceptance is still required before release.
+
 **Stalled final database check and socket disconnect:** The 12-second
 request watchdog must remain armed while the final asynchronous grant
 revalidation is pending; clearing it at receipt of the local result would

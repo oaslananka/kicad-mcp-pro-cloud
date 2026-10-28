@@ -338,17 +338,24 @@ export function attachConnectorWebSocket(
       onDisconnect=()=>resolve(false);
       socket.once("close",onDisconnect);
     });
-    const allowed=await Promise.race([
-      options.connections.authorizeOutgoingSummary(socket,oauth,projectId),
-      new Promise<boolean>(resolve=>{
-        preflightTimer=setTimeout(()=>{preflightTimedOut=true;resolve(false);},8_000);
-        preflightTimer.unref();
-      }),
-      disconnected
-    ]).finally(()=>{
-      if(preflightTimer)clearTimeout(preflightTimer);
-      socket.off("close",onDisconnect);
-    });
+    let allowed:boolean;
+    try{
+      allowed=await Promise.race([
+        options.connections.authorizeOutgoingSummary(socket,oauth,projectId),
+        new Promise<boolean>(resolve=>{
+          preflightTimer=setTimeout(()=>{preflightTimedOut=true;resolve(false);},8_000);
+          preflightTimer.unref();
+        }),
+        disconnected
+      ]).finally(()=>{
+        if(preflightTimer)clearTimeout(preflightTimer);
+        socket.off("close",onDisconnect);
+      });
+    }catch{
+      // Database failures are authorization denial, not an open or
+      // retryable remote read capability. Never leave a ready socket.
+      reject(socket);return null;
+    }
     if(preflightTimedOut){reject(socket);return null;}
     if(!allowed||entry.phase!=="ready"||socket.readyState!==WebSocket.OPEN||
       (entry.sessionDeadline??0)-Date.now()<10_000)return null;
