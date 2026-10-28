@@ -63,7 +63,7 @@ assert_eq() {
 echo 'Restore drill: applying reviewed database schema in source fixture'
 cli "$source" --status >/dev/null
 cli "$source" --apply >/dev/null
-assert_eq "$(sql "$source" 'SELECT count(*) FROM schema_migrations')" "12" "source migration count"
+assert_eq "$(sql "$source" 'SELECT count(*) FROM schema_migrations')" "13" "source migration count"
 
 # Only synthetic metadata; no physical KiCad paths, files or user credentials.
 sql "$source" "INSERT INTO devices(id,owner_sub,alias,enabled) VALUES
@@ -118,6 +118,17 @@ sql "$source" "INSERT INTO pairing_review_budget(owner_sub,window_started_at,att
 sql "$source" "INSERT INTO pairing_device_budget(budget_key,window_started_at,attempts)
  VALUES(repeat('f',64),clock_timestamp(),4)" >/dev/null
 
+# Synthetic CONSUMED approval metadata only. A restored row must never
+# become a new reusable grant, including if a backup is restored elsewhere.
+sql "$source" "INSERT INTO owner_read_approvals
+  (request_id,owner_sub,client_id,device_id,project_id,cloud_origin,
+   operation,issued_at,expires_at,consumed_at)
+  VALUES ('f41d811b-7d84-4d5e-8335-387b4e94f1c5','fixture-owner','fixture-client',
+    'c3e0d32d-d8bf-49c8-ae15-f2acc4c147b7',
+    'a39a9f88-d390-4431-8cd4-2c4430aad321',
+    'https://fixture.example.invalid','project_summary',
+    now(),now()+interval '20 seconds',now())" >/dev/null
+
 echo 'Restore drill: streaming PostgreSQL custom backup to fresh target'
 docker exec "$source" pg_dump -Fc -U fixture -d cloud_fixture \
   --no-owner --no-acl |
@@ -127,7 +138,7 @@ docker exec "$source" pg_dump -Fc -U fixture -d cloud_fixture \
 echo 'Restore drill: checking migrations, permissions and authorization fences'
 cli "$target" --status >/dev/null
 cli "$target" --apply >/dev/null
-assert_eq "$(sql "$target" 'SELECT count(*) FROM schema_migrations')" "12" "restored migration ledger"
+assert_eq "$(sql "$target" 'SELECT count(*) FROM schema_migrations')" "13" "restored migration ledger"
 assert_eq "$(sql "$target" "SELECT count(*) FROM devices WHERE owner_sub='fixture-owner'")" "1" "device metadata"
 assert_eq "$(sql "$target" "SELECT count(*) FROM projects WHERE owner_sub='fixture-owner'")" "1" "project metadata"
 assert_eq "$(sql "$target" "SELECT count(*) FROM project_client_grants WHERE owner_sub='fixture-owner' AND client_id='fixture-client' AND enabled")" "1" "client grant metadata"
@@ -152,8 +163,11 @@ assert_eq "$(sql "$target" "SELECT attempts FROM pairing_device_budget WHERE bud
 assert_eq "$(sql "$target" 'SELECT count(*) FROM device_credentials WHERE revoked_at IS NULL')" "1" "restored public-key device credential"
 assert_eq "$(sql "$target" 'SELECT count(*) FROM device_handshake_challenges')" "1" "restored handshake challenge"
 assert_eq "$(sql "$target" 'SELECT count(*) FROM connector_sessions')" "1" "restored connector session"
+assert_eq "$(sql "$target" "SELECT count(*) FROM owner_read_approvals
+  WHERE request_id='f41d811b-7d84-4d5e-8335-387b4e94f1c5'
+  AND consumed_at IS NOT NULL")" "1" "restored approval remains consumed"
 assert_eq "$(sql "$target" "SELECT state FROM connector_sessions WHERE id='17bcf345-4d7f-43f1-b2d6-ed6ee2418a6e'")" "pending" "restored pending session"
 assert_eq "$(sql "$target" "SELECT status FROM device_handshake_challenges WHERE id='41763f41-bebb-476c-a18a-58d303841e91'")" "pending" "handshake remains pending"
 assert_eq "$(sql "$target" "SELECT count(*) FROM device_credentials WHERE device_id='c3e0d32d-d8bf-49c8-ae15-f2acc4c147b7' AND owner_sub='fixture-owner'")" "1" "credential ownership"
 assert_eq "$target_ledger" "$source_ledger" "restored checksum ledger"
-echo 'Restore drill passed: all twelve migrations, pairing metadata, cutoff policy and triggers recovered'
+echo 'Restore drill passed: all thirteen migrations, owner receipt ledger, pairing metadata, cutoff policy and triggers recovered'
