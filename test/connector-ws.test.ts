@@ -173,9 +173,9 @@ test("invalid device signature never starts an authenticated connector session",
   });
 });
 
-test("authenticated Cloud socket relays one owner-granted metadata read and checks revocation",
+test("authenticated Cloud socket rejects in-flight client, grant and device revocation",
   {skip:!url,timeout:90_000},async()=>{
-  for(const revoked of [false,true]){
+  for(const revocation of ["none","grant","device","token"] as const){
     await inIsolatedDatabase(url!,migrations,async db=>{
       const owner="summary-owner",clientId="approved-client";
       const keys=generateKeyPairSync("ed25519");
@@ -218,18 +218,30 @@ test("authenticated Cloud socket relays one owner-granted metadata read and chec
         assert.equal(request.kind,"connector.read_request");
         assert.equal(request.operation,"project_summary");
         assert.equal(request.projectId,project);
-        if(revoked){
-          await db.query("UPDATE project_client_grants SET enabled=false WHERE project_id=$1",[project]);
+        if(revocation==="grant"){
+          await db.query("UPDATE project_client_grants SET enabled=false WHERE project_id=$1",
+            [project]);
+        }else if(revocation==="device"){
+          assert.equal(await pair.revokeDevice(owner,device),true);
+          assert.equal((await db.query<{state:string}>(
+            "SELECT state FROM connector_sessions WHERE device_id=$1",[device])
+          ).rows[0].state,"revoked");
+        }else if(revocation==="token"){
+          await db.query("INSERT INTO client_token_cutoffs(owner_sub,client_id,revoked_at) "+
+            "VALUES($1,$2,clock_timestamp())",[owner,clientId]);
         }
         const reply={kind:"connector.local_read_preview",version:1,
           requestId:request.requestId,projectId:project,operation:"project_summary",
           files:{projectPresent:true,boardPresent:false,schematicPresent:true}};
-        const ack=revoked ? null : waitMessage(ws);
+        const ack=revocation==="none" ? waitMessage(ws) : null;
+        const close=revocation==="none" ? null : waitClose(ws);
         ws.send(JSON.stringify({kind:"connector.read_result",version:1,
           sequence:1,result:reply}));
         const result=await pending;
-        if(revoked){assert.equal(result,null);}
-        else{
+        if(revocation!=="none"){
+          assert.equal(result,null,"Must not return private project metadata after "+revocation);
+          assert.equal(await close,1008,"Must close the revoked socket without an ACK");
+        }else{
           assert.deepEqual(result,reply);
           const receipt=await ack!;
           assert.equal(receipt.kind,"connector.read_ack");
