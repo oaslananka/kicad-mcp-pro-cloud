@@ -55,17 +55,35 @@ export class PgOwnerReadWebAuthnIssuer{
     this.authorityRPID=validAuthorityOrigin(authorityOrigin).hostname;
   }
 
-  async begin(intent:OwnerReadApprovalIntent,credentialId:string){
-    if(!checkIntent(intent,Date.now())||!CREDENTIAL_ID.test(credentialId))return null;
-    // A permissive/general application DB login is never an issuer.
+  /** Startup preflight and per-request least-privilege fence.
+   * An issuer can sign/insert owner receipts but cannot activate passkeys,
+   * consume receipts, or create arbitrary credentials.
+   */
+  async verifyRestrictedRole():Promise<boolean>{
     const privilege=await this.db.query<{allowed:boolean}>(
       "SELECT has_table_privilege(current_user,'owner_read_approvals','INSERT')"+
       " AND NOT has_table_privilege(current_user,'owner_read_approvals','UPDATE')"+
       " AND NOT has_table_privilege(current_user,'owner_read_approvals','DELETE')"+
       " AND NOT has_table_privilege(current_user,'owner_read_approvals','TRUNCATE')"+
       " AND NOT has_column_privilege(current_user,'owner_read_approvals','consumed_at','UPDATE')"+
-      " AS allowed");
-    if(!privilege.rows[0]?.allowed)return null;
+      " AND has_table_privilege(current_user,'owner_read_passkeys','SELECT')"+
+      " AND has_column_privilege(current_user,'owner_read_passkeys','sign_count','UPDATE')"+
+      " AND NOT has_column_privilege(current_user,'owner_read_passkeys','enabled','UPDATE')"+
+      " AND NOT has_column_privilege(current_user,'owner_read_passkeys','public_key','UPDATE')"+
+      " AND NOT has_table_privilege(current_user,'owner_read_passkeys','INSERT')"+
+      " AND NOT has_table_privilege(current_user,'owner_read_passkeys','DELETE')"+
+      " AND has_table_privilege(current_user,'owner_read_webauthn_challenges','SELECT')"+
+      " AND has_table_privilege(current_user,'owner_read_webauthn_challenges','INSERT')"+
+      " AND has_column_privilege(current_user,'owner_read_webauthn_challenges','used_at','UPDATE')"+
+      " AND NOT has_table_privilege(current_user,'owner_read_webauthn_challenges','DELETE')"+
+      " AS allowed"
+    );
+    return privilege.rows[0]?.allowed===true;
+  }
+
+  async begin(intent:OwnerReadApprovalIntent,credentialId:string){
+    if(!checkIntent(intent,Date.now())||!CREDENTIAL_ID.test(credentialId))return null;
+    if(!await this.verifyRestrictedRole())return null;
     const registered=await this.db.query<{credential_id:string}>(
       "SELECT credential_id FROM owner_read_passkeys "+
       "WHERE credential_id=$1 AND owner_sub=$2 AND enabled=true",

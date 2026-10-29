@@ -296,3 +296,42 @@ independent owner deployment, an issuer-only SQL role and the pinned Cloud
 verification key, then obtain real owner GitHub OAuth and physical passkey
 approval. The existing passive acceptance CLI must not be enabled as
 an approval issuer by inventing test credentials or switching flags.
+
+### Dedicated independent owner issuer launcher (draft only)
+
+The repository now contains a separate, default-deny owner:issuer executable.
+This does not modify the existing passive-only owner:acceptance command, and
+the production Cloud app and deployment do not invoke either issuer route.
+
+Required private configuration, with no built-in credentials or defaults:
+- OWNER_REVIEW_ENABLED=true, OWNER_REVIEW_ORIGIN, OWNER_REVIEW_PORT,
+  OWNER_REVIEW_CLOUD_ORIGIN
+- OWNER_REVIEW_IDENTITY_DB_URL, OWNER_REVIEW_REGISTRATION_DB_URL,
+  OWNER_REVIEW_ISSUER_DB_URL (three independent restricted SQL logins)
+- OWNER_REVIEW_OWNER_SUB, OWNER_REVIEW_BETTER_AUTH_SECRET,
+  OWNER_REVIEW_GITHUB_CLIENT_ID, OWNER_REVIEW_GITHUB_CLIENT_SECRET,
+  OWNER_REVIEW_CSRF_KEY
+- OWNER_REVIEW_TLS_KEY_FILE, OWNER_REVIEW_TLS_CERT_FILE,
+  OWNER_REVIEW_CLOUD_PUBLIC_KEY_FILE (Cloud Ed25519 PUBLIC key only)
+
+The launcher requires exact HTTPS origins, binds to loopback, and compares
+physical PostgreSQL principals and underlying table identities. Startup
+is denied if issuer, identity and registration SQL accounts are not
+distinct, or if the issuer can activate passkeys, modify receipt scope,
+consume approvals or delete credentials. The registration account must
+also pass its existing least-privilege preflight.
+
+A signed Cloud request can be reviewed only if the separate issuer finds
+EXACTLY ONE already enabled passkey owned by the independent human identity.
+Zero or multiple enabled credentials fail closed. Neither an OAuth client
+nor a Cloud request may supply the credential ID. A real Better Auth owner
+session, CSRF and UV WebAuthn proof remain mandatory before receipt issuance.
+No activation, MCP token issuer, connector WSS or local KiCad read is mounted.
+Shutdown closes all independent SQL pools; no errors print secrets.
+
+The disposable PostgreSQL/HTTPS acceptance tests validate denied-by-default
+startup, separate SQL principals, excessive-privilege rejection, failure
+without active credentials, actual signed-intent delivery with a synthetic
+active credential, and replay rejection. Those credentials and SQL grants
+exist ONLY inside the isolated test. Deployment, key provisioning, physical
+owner authentication and KiCad device acceptance remain blocked.

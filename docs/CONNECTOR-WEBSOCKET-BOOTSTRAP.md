@@ -766,3 +766,14 @@ the signed request. Cloud's Ed25519 signature only authenticates the
 request scope, **not the human**, and cannot mint a receipt by itself.
 Issuer-only PostgreSQL rights and UV-verified WebAuthn remain mandatory.
 No production release or deployment is permitted from this draft.
+
+### Independent owner issuer process (not a live Cloud route)
+
+The opt-in owner:issuer executable has its own OWNER_REVIEW_* settings,
+separate OAuth identity, three independently restricted SQL principals,
+pinned Cloud Ed25519 public key and an exact HTTPS origin. Its role
+preflight rejects approval-consuming or passkey-activating privileges.
+Only a previously enabled owner passkey can issue one scoped receipt.
+The passive-only owner:acceptance executable and the Cloud production
+main.ts entrypoint are unchanged. Real human, key, local device and live
+WSS acceptance gates still apply. NO-GO for production or merging #64.
