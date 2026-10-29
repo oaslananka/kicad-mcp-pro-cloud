@@ -64,8 +64,9 @@ export class PgOwnerReadPasskeyRegistration{
     if(!hashed)return null;
     await this.db.query(
       "INSERT INTO owner_read_passkey_registrations"+
-      "(request_id,owner_sub,challenge_digest,expires_at)"+
-      " VALUES($1,$2,$3,clock_timestamp()+interval '120 seconds')",
+      "(request_id,owner_sub,challenge_digest,created_at,expires_at)"+
+      " VALUES($1,$2,$3,statement_timestamp(),"+
+      "statement_timestamp()+interval '120 seconds')",
       [requestId,ownerSub,hashed]);
     return options;
   }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {createServer} from "node:http";
+import {createServer,request as httpRequest} from "node:http";
 import type {AddressInfo} from "node:net";
 import {test} from "node:test";
 import type {RegistrationResponseJSON} from "@simplewebauthn/server";
@@ -37,14 +37,37 @@ test("isolated registration endpoints require independent owner, strict origin a
   const server=createServer((req,res)=>{void handler(req,res);});
   await new Promise<void>(r=>server.listen(0,"127.0.0.1",r));
   const addr=server.address() as AddressInfo;
-  const root="http://127.0.0.1:"+addr.port;
   const begin="/owner-passkey/register/begin";
   const complete="/owner-passkey/register/complete";
+  type TestResponse={status:number;headers:{get:(name:string)=>string|undefined};
+    json:()=>Promise<unknown>};
+  const call=(path:string,body:unknown,headers:Record<string,string>={},
+    method="POST"):Promise<TestResponse>=>{
+    // No dynamic or user-provided URL can leave the isolated loopback server.
+    if(![begin,complete,"/other"].includes(path))throw new Error("Unsafe test path");
+    return new Promise((resolve,reject)=>{
+      const client=httpRequest({hostname:"127.0.0.1",port:addr.port,
+        path,method,headers:{
+          Origin:expectedOrigin,"Content-Type":"application/json",
+          "Sec-Fetch-Site":"same-origin","X-Fixture-Auth":"authenticated",...headers
+        }},res=>{
+        const chunks:Buffer[]=[];
+        res.on("data",(chunk:Buffer)=>chunks.push(Buffer.from(chunk)));
+        res.on("end",()=>{
+          const result=Buffer.concat(chunks).toString("utf8");
+          resolve({status:res.statusCode??0,
+            headers:{get:name=>res.headers[name]?.toString()},
+            json:async()=>JSON.parse(result) as unknown});
+        });
+        res.on("error",reject);
+      });
+      client.on("error",reject);
+      if(method==="POST")client.end(JSON.stringify(body));
+      else client.end();
+    });
+  };
   const post=(path:string,body:unknown,headers:Record<string,string>={})=>
-    fetch(root+path,{method:"POST",headers:{
-      Origin:expectedOrigin,"Content-Type":"application/json",
-      "Sec-Fetch-Site":"same-origin","X-Fixture-Auth":"authenticated",...headers},
-    body:JSON.stringify(body)});
+    call(path,body,headers);
   try{
     assert.equal((await post(begin,{csrf},{
       "X-Fixture-Auth":"anonymous"})).status,403);
@@ -55,7 +78,7 @@ test("isolated registration endpoints require independent owner, strict origin a
     assert.equal((await post(begin,{csrf:"incorrect"})).status,403);
     assert.equal((await post(begin,{csrf},{
       "Content-Type":"text/plain"})).status,403);
-    assert.equal((await fetch(root+begin)).status,403);
+    assert.equal((await call(begin,{},{},"GET")).status,403);
     assert.equal((await post("/other",{csrf})).status,404);
     assert.equal(called,0,"Untrusted requests must not start passkey challenges");
     const started=await post(begin,{csrf,

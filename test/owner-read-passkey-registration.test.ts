@@ -85,6 +85,12 @@ test("Chrome registration produces only an inactive passkey under SQL role isola
         assert.ok(options);
         assert.equal(options.authenticatorSelection?.userVerification,"required");
         assert.deepEqual(options.pubKeyCredParams.map(p=>p.alg),[-7]);
+        const expiry=await admin.query<{duration_ms:number}>(
+          "SELECT extract(epoch FROM (expires_at-created_at))*1000 "+
+          "AS duration_ms FROM owner_read_passkey_registrations "+
+          "WHERE request_id=$1",[requestId]);
+        assert.equal(Number(expiry.rows[0]?.duration_ms),120_000,
+          "Issue time and expiry use one statement clock, no microsecond drift");
         browser=await chromium.launch({channel:"chrome",headless:true});
         const context=await browser.newContext({ignoreHTTPSErrors:true});
         try{
