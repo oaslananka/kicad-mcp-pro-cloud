@@ -550,3 +550,41 @@ created that scope. The production Cloud router does not mount any of
 these standalone classes. PR #64 MUST remain DRAFT and the connector
 MUST remain OFF pending actual independently authenticated owner
 session, real passkey and physical KiCad end-to-end acceptance.
+
+### Independent owner session backed by real Better Auth validation
+
+`src/owner-read-better-auth-session.ts` supplies an opt-in, standalone
+`RegistrationSessionVerifier` for the independent HTTPS owner approval
+authority. It uses the issuer's own `betterAuth.api.getSession` with a
+signed browser cookie and current PostgreSQL session rather than a
+request-submitted user ID, OAuth-client claim, or synthetic trusted callback.
+The factory **requires the Better Auth instance's exact HTTPS baseURL to
+equal the independent authority origin**, a configured exact owner ID and
+an independent random CSRF key. It rejects wrong Host, proxy-forwarded
+authority overrides, Bearer headers, malformed cookies, expired sessions,
+unverified owner emails and sessions for a different owner. An HMAC-derived
+CSRF token is scoped to the actual authenticated session ID, session token,
+allowed owner ID and authority origin. Session revocation makes both cookie
+and CSRF token unusable on subsequent requests.
+
+`test/owner-read-better-auth-session.test.ts` uses Better Auth 1.7.13's
+**real signed HTTPS session cookie** and a disposable PostgreSQL user and
+session table. It proves expired, unverified, forged, non-owner and revoked
+sessions are rejected, and a new session generates a different CSRF token.
+`test/owner-read-better-auth-session-http.test.ts` uses a local,
+certificate-validated HTTPS listener to exercise the **existing registration
+page and registration HTTP adapter** using that real Better Auth owner
+verifier. Anonymous, unsigned, forged-host, cross-site and CSRF-invalid
+requests fail; a valid current owner session can start the registration
+challenge, and after session revocation its old cookie/CSRF cannot do so.
+
+**Critical deployment boundary:** the independent issuer MUST authenticate
+its own first-party Better Auth session under its own HTTPS origin, OAuth
+redirect registration, identity-store/secret and ingress. NEVER forward
+Cloud's first-party browser cookie to a different authority host or share
+a production database/Better Auth signing secret to fake this boundary.
+No issuer is deployed or mounted on Cloud; the tests use synthetic Better
+Auth users inserted into disposable PostgreSQL, NOT a real human's OAuth
+sign-in, physical passkey, public owner issuer, or local KiCad acceptance.
+The independent owner ID/key/provider setup and enrollment remain
+release-blocking; PR #64 stays DRAFT and `remoteConnector` stays OFF.
