@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {randomBytes,randomUUID} from "node:crypto";
+import {randomUUID} from "node:crypto";
 import {test} from "node:test";
 import {Pool} from "pg";
 import type {Pool as PoolType} from "pg";
@@ -15,18 +15,28 @@ const url=process.env.TEST_DATABASE_URL;
 async function withRestrictedConsumer(
   admin:PoolType,action:(consumer:PoolType)=>Promise<void>
 ):Promise<void>{
-  const role="fixture_receipt_"+randomBytes(8).toString("hex");
-  const password=randomBytes(20).toString("hex");
+  // Fixed fixture-only name avoids ever constructing SQL with a JS identifier.
+  // Node's test runner executes this file's top-level tests sequentially; each
+  // fixture drops this role before the next starts.
+  const role="cloud_approval_fixture_reader";
+  const password="isolated_postgres_fixture_only";
   const schema=(await admin.query<{schema:string}>(
     "SELECT current_schema() AS schema")).rows[0]?.schema;
   if(!schema||!/^fixture_[a-f0-9]{18}$/.test(schema))throw Error("Unsafe test schema");
-  const roleId='"'+role+'"',table='"'+schema+'".owner_read_approvals';
-  await admin.query("CREATE ROLE "+roleId+" LOGIN PASSWORD '"+password+"'");
+  await admin.query(
+    "CREATE ROLE cloud_approval_fixture_reader LOGIN PASSWORD 'isolated_postgres_fixture_only'");
   let consumer:PoolType|undefined;
   try{
-    await admin.query("GRANT USAGE ON SCHEMA "+'"'+schema+'"'+" TO "+roleId);
-    await admin.query("GRANT SELECT ON "+table+" TO "+roleId);
-    await admin.query("GRANT UPDATE(consumed_at) ON "+table+" TO "+roleId);
+    // PostgreSQL's own %I identifier quoting uses the isolated current_schema.
+    // The entire SQL text is static; no input is manually concatenated into it.
+    await admin.query(
+      "DO $plpgsql$ BEGIN EXECUTE format("+
+      "'GRANT USAGE ON SCHEMA %I TO cloud_approval_fixture_reader',"+
+      "current_schema()); END $plpgsql$");
+    await admin.query(
+      "GRANT SELECT ON owner_read_approvals TO cloud_approval_fixture_reader");
+    await admin.query(
+      "GRANT UPDATE(consumed_at) ON owner_read_approvals TO cloud_approval_fixture_reader");
     const target=new URL(url!);
     target.username=role;
     target.password=password;
@@ -38,8 +48,8 @@ async function withRestrictedConsumer(
     await action(consumer);
   }finally{
     await consumer?.end();
-    await admin.query("DROP OWNED BY "+roleId);
-    await admin.query("DROP ROLE "+roleId);
+    await admin.query("DROP OWNED BY cloud_approval_fixture_reader");
+    await admin.query("DROP ROLE cloud_approval_fixture_reader");
   }
 }
 const scope=()=>({
