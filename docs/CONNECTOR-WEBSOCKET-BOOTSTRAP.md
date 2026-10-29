@@ -417,3 +417,35 @@ establish real human identity or production access.
 and owner activation ceremony, deployable issuer, physical KiCad acceptance,
 signed browser session verification and end-to-end production WSS remain
 unproven. Keep `CONNECTOR_WS_ENABLED` disabled and PR #64 DRAFT.
+
+## Independent owner passkey enrollment page (draft-only)
+
+`src/owner-read-enrollment-ui.ts` and
+`src/owner-read-enrollment-client.js` add a small registration UI and
+same-origin browser workflow, deliberately **not** installed in the
+production Cloud router. The standalone HTTPS page handler requires an
+independently authenticated owner session and exact authority Host plus
+same-origin or top-level navigation Fetch Metadata. The HTML escapes
+the owner label, preserves a session-bound CSRF value inside a non-executable
+JSON script tag, disables framing, and uses no-store/no-referrer and a
+same-origin external JavaScript file.
+
+The UI does not automatically start a challenge when loaded. Only clicking
+**Register passkey** calls the already restricted `/owner-passkey/register/begin`
+endpoint, converts the verified HTTPS RP-ID-bound ES256 challenge into
+the browser's `navigator.credentials.create()` ceremony, and submits
+the signed credential response to `/owner-passkey/register/complete`.
+The server must still verify user presence and user verification. A
+successful enrollment displays **registered but not activated**; the UI
+provides no activation, issuer-approval or KiCad remote-read button.
+
+`test/owner-read-enrollment-ui.test.ts` exercises HTTPS session rejection,
+the no-silent-registration condition, actual Chrome virtual WebAuthn
+creation and server cryptographic verification after a user-interface
+click. The browser test's owner-session callback and registration result
+are explicitly **synthetic**; the separate PostgreSQL test verifies
+registration creates a disabled credential with a limited DB role.
+Neither acceptance test proves enrollment or identity verification of a
+real owner or a physical passkey. A real independent owner-authenticated
+issuer deployment, separate passkey activation ceremony and physical
+KiCad E2E remain blocking; keep PR #64 DRAFT and production connector OFF.
