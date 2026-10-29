@@ -46,7 +46,7 @@ version=$(docker exec kicad-cloud-db-1 psql -U kicad_cloud -d kicad_cloud -At \
   -c 'SELECT max(version) FROM schema_migrations')
 ledger=$(docker exec kicad-cloud-db-1 psql -U kicad_cloud -d kicad_cloud -At \
   -c "SELECT count(*)::text || ':' || coalesce(md5(string_agg(version::text || ':' || checksum, '|' ORDER BY version)), '') FROM schema_migrations")
-[[ "$version" =~ ^([1-9]|1[0-2])$ && "$ledger" =~ ^[1-9][0-9]*:[a-f0-9]{32}$ ]]
+[[ "$version" =~ ^[1-9][0-9]{0,2}$ && "$ledger" =~ ^[1-9][0-9]*:[a-f0-9]{32}$ && "${ledger%%:*}" == "$version" ]]
 # Destination is always immutable and contains only ciphertext.
 ssh "${ssh_opts[@]}" "$remote" test ! -e "$dir/$filename"
 scp -q "${ssh_opts[@]}" "$src" "$remote:$dir/.partial-$filename"
