@@ -488,3 +488,40 @@ isolated test is RED against the pre-017 schema and GREEN with 017.
 All historic migrations, including 013–016, retain their original
 bytes and checksums. No production credential, socket or issuer is
 enabled by this draft-only schema.
+
+## Owner passkey activation (independent, NOT production-enabled)
+
+`db/018_owner_read_passkey_activation.pgsql` and
+`src/owner-read-passkey-activation.ts` provide a standalone
+registration-to-active boundary. The activation requires a **new**
+WebAuthn authentication challenge (120-second expiry, single attempt,
+userVerification required) tied to an *existing but inactive* credential
+and a trusted owner identity supplied by an independently authenticated
+owner session. The server verifies the P-256 signature, expected issuer
+HTTPS origin/RP ID, stored public key, authenticator counter and UV bit
+before changing `enabled` to true. A database trigger makes activation
+challenges irrevocably consumed: the activation SQL login cannot reset
+`used_at` to permit replay. Failed proofs permanently consume their
+challenge and require a newly authenticated request.
+
+The restricted activation SQL login needs only table SELECT on passkeys,
+UPDATE on `enabled` and `sign_count`, and a separate activation challenge
+ledger. It must NOT be the registration role, issuer role, approval receipt
+consumer or an application table owner. It is unable to modify passkey
+public keys, insert a passkey, or create a project-read receipt.
+`test/owner-read-passkey-activation.test.ts` uses isolated PostgreSQL 17
+role credentials and real synthetic P-256 signed WebAuthn assertions to
+validate successful one-time owner activation, missing UV, wrong origin,
+forged signatures, wrong owner, direct replay/reset, database role limits,
+and **zero owner-read receipts** after activation.
+
+**Security limitation:** a compromised activation SQL principal with
+`UPDATE(enabled)` could bypass the TypeScript proof checks. This is
+an independently privileged operator capability, NOT proof of a secure
+production activation service. The real activation endpoint must be
+isolated from Cloud and the OAuth client, strongly authenticated with a
+real owner session, protected from direct SQL/endpoint misuse, restricted
+by independent ingress/CSRF/rate controls and accepted using a physically
+enrolled real passkey. No activation HTTP handler, owner login verifier,
+production SQL role, passkey enrollment, credential, or feature flag
+is deployed. PR #64 remains DRAFT and Cloud connector OFF.
