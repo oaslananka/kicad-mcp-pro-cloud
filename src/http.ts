@@ -18,10 +18,15 @@ import { oauthProviderResponse } from "./oauth-error.js";
 import { renderLanding } from "./browser-ui.js";
 import { uiCss } from "./ui-styles.js";
 import type {TrustedOAuthReadIdentity} from "./connector-read-gate.js";
-import type {SummaryReadResult} from "./connector-ws.js";
+import type {PreparedOwnerSummary,SummaryReadResult} from "./connector-ws.js";
+import {OwnerSummaryHttpPreparations} from "./owner-summary-http-preparations.js";
 
-type SummaryRelay={requestSummary:(oauth:TrustedOAuthReadIdentity,deviceId:string,
-  projectId:string)=>Promise<SummaryReadResult|null>};
+type SummaryRelay={
+  prepareOwnerSummary:(oauth:TrustedOAuthReadIdentity,deviceId:string,
+    projectId:string)=>PreparedOwnerSummary|null;
+  requestSummary:(oauth:TrustedOAuthReadIdentity,deviceId:string,
+    projectId:string,prepared:PreparedOwnerSummary)=>Promise<SummaryReadResult|null>;
+};
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const MAX_BODY = 1024 * 1024;
@@ -76,8 +81,9 @@ export type CloudHttpServices={
 export function createHttpServer(
   config:Config,inventory:Inventory,verify:Verifier,services:CloudHttpServices={}
 ):Server{
+  const preparations=new OwnerSummaryHttpPreparations();
   return createServer((req,res)=>{
-    void handleRequest(req,res,config,inventory,verify,services).catch(()=>{
+    void handleRequest(req,res,config,inventory,verify,services,preparations).catch(()=>{
       if(!res.headersSent)deny(res,500,"internal_error");
       else res.end();
     });
@@ -86,7 +92,8 @@ export function createHttpServer(
 
 async function handleRequest(
   req:IncomingMessage,res:ServerResponse,config:Config,inventory:Inventory,
-  verify:Verifier,services:CloudHttpServices
+  verify:Verifier,services:CloudHttpServices,
+  preparations:OwnerSummaryHttpPreparations
 ):Promise<void>{
     const {grants,identity,devices,pairings,pairingDevice,deviceSource,summaryRelay}=services;
     try {
@@ -244,8 +251,9 @@ async function handleRequest(
       // The relay is absent unless connector WS is explicitly enabled. The
       // bearer JWT, revocation cutoff and project grant are enforced before
       // any server-to-device request; no browser/session cookie is accepted.
-      if (path === "/api/v1/connector/project-summary" && req.method === "POST"
-          && summaryRelay?.()) {
+      const isSummaryPrepare=path==="/api/v1/connector/project-summary/prepare";
+      if ((isSummaryPrepare||path==="/api/v1/connector/project-summary") &&
+          req.method==="POST"&&summaryRelay?.()) {
         const header=req.headers.authorization;
         const matched=typeof header==="string" ?
           /^Bearer ([A-Za-z0-9._~+/-]+={0,2})$/.exec(header) : null;
@@ -269,17 +277,56 @@ async function handleRequest(
           deny(res,400,"invalid_request");return;
         }
         const fields=body as Record<string,unknown>;
-        if(Object.keys(fields).length!==2||
-          !["deviceId","projectId"].every(key=>Object.hasOwn(fields,key))||
+        const requiredKeys=isSummaryPrepare
+          ? ["deviceId","projectId"]
+          : ["deviceId","projectId","requestId"];
+        if(Object.keys(fields).length!==requiredKeys.length||
+          !requiredKeys.every(key=>Object.hasOwn(fields,key))||
           typeof fields.deviceId!=="string"||!UUID.test(fields.deviceId)||
-          typeof fields.projectId!=="string"||!UUID.test(fields.projectId)){
+          typeof fields.projectId!=="string"||!UUID.test(fields.projectId)||
+          (!isSummaryPrepare&&
+            (typeof fields.requestId!=="string"||!UUID.test(fields.requestId)))){
           deny(res,400,"invalid_request");return;
         }
         const relay=summaryRelay();
-        const result=await relay?.requestSummary({ownerSub:actor.sub,
-          clientId:actor.clientId,accessTokenIssuedAtSeconds:actor.issuedAt},
-          fields.deviceId,fields.projectId);
-        if(!result){deny(res,404,"not_available");return;}
+        if(!relay){deny(res,404,"not_available");return;}
+        const oauth={
+          ownerSub:actor.sub,clientId:actor.clientId,
+          accessTokenIssuedAtSeconds:actor.issuedAt
+        };
+        if(isSummaryPrepare){
+          // Never publish a request for a project not owned by this client
+          // and device. Recheck token after the awaited SQL grant lookup.
+          const project=await inventory.getProject(actor.sub,actor.clientId,
+            fields.projectId);
+          if(!project||project.deviceId!==fields.deviceId){
+            deny(res,403,"forbidden");return;
+          }
+          try{await verify(matched[1]);}
+          catch{deny(res,403,"forbidden");return;}
+          if(!await inventory.isAccessTokenAllowed(
+            actor.sub,actor.clientId,actor.issuedAt)){
+            deny(res,403,"forbidden");return;
+          }
+          const intent=preparations.prepare(matched[1],oauth,
+            fields.deviceId,fields.projectId,
+            ()=>relay.prepareOwnerSummary(oauth,fields.deviceId as string,fields.projectId as string));
+          if(!intent){deny(res,404,"not_available");return;}
+          json(res,200,{requestId:intent.requestId,
+            ownerSub:intent.ownerSub,clientId:intent.clientId,
+            deviceId:intent.deviceId,projectId:intent.projectId,
+            operation:intent.operation,origin:intent.origin,
+            expiresAtUnixMs:intent.expiresAtUnixMs});
+          return;
+        }
+        const prepared=preparations.take(fields.requestId as string,
+          matched[1],oauth,fields.deviceId,fields.projectId);
+        if(!prepared){deny(res,404,"not_available");return;}
+        const result=await relay.requestSummary(oauth,
+          fields.deviceId,fields.projectId,prepared);
+        if(!result||result.requestId!==prepared.requestId){
+          deny(res,404,"not_available");return;
+        }
         // Reverify JWT expiry and cutoff before returning the data, not just
         // before dispatch. A token can expire during a local read.
         try{await verify(matched[1]);}

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import {randomUUID} from "node:crypto";
+import type {PreparedOwnerSummary} from "../src/connector-ws.js";
+import type {TrustedOAuthReadIdentity} from "../src/connector-read-gate.js";
 import { createServer as httpCreateServer, request as httpRequest, type Server } from "node:http";
 import { after, before, test } from "node:test";
 import type { AddressInfo } from "node:net";
@@ -287,6 +290,36 @@ test("premium public interface and same-origin stylesheet use hardened headers",
   assert.equal((await fetch(endpoint+"/assets/ui.js")).status,404);
 });
 
+function testPrepared(
+  actor:TrustedOAuthReadIdentity,deviceId:string,projectId:string
+):PreparedOwnerSummary{
+  return Object.freeze({
+    requestId:randomUUID(),ownerSub:actor.ownerSub,clientId:actor.clientId,
+    deviceId,projectId,origin:config.publicOrigin,
+    operation:"project_summary",expiresAtUnixMs:Date.now()+30_000
+  });
+}
+const summaryPath="/api/v1/connector/project-summary";
+async function prepareHttpRead(origin:string,token:string,body:string){
+  return fetch(origin+summaryPath+"/prepare",{
+    method:"POST",headers:headers(token),body
+  });
+}
+async function completeHttpRead(origin:string,token:string,
+  deviceId:string,projectId:string,requestId:string){
+  return fetch(origin+summaryPath,{
+    method:"POST",headers:headers(token),
+    body:JSON.stringify({deviceId,projectId,requestId})
+  });
+}
+async function twoStepHttpRead(origin:string,token:string,
+  deviceId:string,projectId:string):Promise<Response>{
+  const ready=await prepareHttpRead(origin,token,JSON.stringify({deviceId,projectId}));
+  if(!ready.ok)return ready;
+  const scope=await ready.json() as {requestId:string};
+  return completeHttpRead(origin,token,deviceId,projectId,scope.requestId);
+}
+
 test("Cloud HTTP read refuses grant revocation after relay result but before reply",async()=>{
   const path="/api/v1/connector/project-summary";
   let grantActive=true;
@@ -300,12 +333,14 @@ test("Cloud HTTP read refuses grant revocation after relay result but before rep
     }
   };
   const relay={
-    async requestSummary(_actor:unknown,_device:string,projectId:string){
+    prepareOwnerSummary:testPrepared,
+    async requestSummary(_actor:unknown,_device:string,projectId:string,
+      prepared:PreparedOwnerSummary){
       // Simulates a real owner revocation in the interleaving between the
       // WSS relay's acceptance and the HTTP response write.
       grantActive=false;
       return {kind:"connector.local_read_preview" as const,version:1 as const,
-        requestId:id,projectId,operation:"project_summary" as const,
+        requestId:prepared.requestId,projectId,operation:"project_summary" as const,
         files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
     }
   };
@@ -313,13 +348,11 @@ test("Cloud HTTP read refuses grant revocation after relay result but before rep
   await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
   try{
     const port=(proxy.address() as AddressInfo).port;
-    const result=await fetch("http://127.0.0.1:"+port+path,{
-      method:"POST",headers:headers(),
-      body:JSON.stringify({deviceId:mockProject.deviceId,projectId:id})
-    });
+    const result=await twoStepHttpRead("http://127.0.0.1:"+port,
+      "test-user-a",mockProject.deviceId,id);
     assert.equal(result.status,403,
       "Revoke-after-relay must not return project presence bytes to the client");
-    assert.equal(lookedUp,1);
+    assert.equal(lookedUp,2);
     assert.deepEqual(await result.json(),{error:"forbidden"});
   }finally{
     await new Promise<void>(resolve=>proxy.close(()=>resolve()));
@@ -343,14 +376,16 @@ test("Cloud HTTP read denies token expiry during the final awaited project looku
       const found=await inventory.getProject(owner,clientId,projectId);
       // Simulate a JWT expiry exactly while the final project/grant
       // lookup was awaited, after the first post-relay JWT verification.
-      expired=true;
+      if(lookups===2)expired=true;
       return found;
     }
   };
   const relay={
-    async requestSummary(_actor:unknown,_device:string,projectId:string){
+    prepareOwnerSummary:testPrepared,
+    async requestSummary(_actor:unknown,_device:string,projectId:string,
+      prepared:PreparedOwnerSummary){
       return {kind:"connector.local_read_preview" as const,version:1 as const,
-        requestId:id,projectId,operation:"project_summary" as const,
+        requestId:prepared.requestId,projectId,operation:"project_summary" as const,
         files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
     }
   };
@@ -358,15 +393,13 @@ test("Cloud HTTP read denies token expiry during the final awaited project looku
   await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
   try{
     const port=(proxy.address() as AddressInfo).port;
-    const result=await fetch("http://127.0.0.1:"+port+path,{
-      method:"POST",headers:headers(),
-      body:JSON.stringify({deviceId:mockProject.deviceId,projectId:id})
-    });
+    const result=await twoStepHttpRead("http://127.0.0.1:"+port,
+      "test-user-a",mockProject.deviceId,id);
     assert.equal(result.status,403,
       "Token expired during final grant lookup must never release project presence");
     assert.deepEqual(await result.json(),{error:"forbidden"});
-    assert.equal(lookups,1);
-    assert.equal(verifications,3,
+    assert.equal(lookups,2);
+    assert.equal(verifications,5,
       "HTTP must verify JWT immediately before delivering the final metadata");
   }finally{
     await new Promise<void>(resolve=>proxy.close(()=>resolve()));
@@ -388,14 +421,16 @@ test("Cloud HTTP read denies token revocation during the final project lookup",a
       const project=await inventory.getProject(owner,clientId,projectId);
       // Model revocation committed while the last project query awaited
       // the database, after the previous cutoff check succeeded.
-      tokenActive=false;
+      if(projectChecks===2)tokenActive=false;
       return project;
     }
   };
   const relay={
-    async requestSummary(_actor:unknown,_device:string,projectId:string){
+    prepareOwnerSummary:testPrepared,
+    async requestSummary(_actor:unknown,_device:string,projectId:string,
+      prepared:PreparedOwnerSummary){
       return {kind:"connector.local_read_preview" as const,version:1 as const,
-        requestId:id,projectId,operation:"project_summary" as const,
+        requestId:prepared.requestId,projectId,operation:"project_summary" as const,
         files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
     }
   };
@@ -403,15 +438,13 @@ test("Cloud HTTP read denies token revocation during the final project lookup",a
   await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
   try{
     const port=(proxy.address() as AddressInfo).port;
-    const result=await fetch("http://127.0.0.1:"+port+"/api/v1/connector/project-summary",{
-      method:"POST",headers:headers(),
-      body:JSON.stringify({deviceId:mockProject.deviceId,projectId:id})
-    });
+    const result=await twoStepHttpRead("http://127.0.0.1:"+port,
+      "test-user-a",mockProject.deviceId,id);
     assert.equal(result.status,403,
       "revocation completed during final project lookup must deny presence data");
     assert.deepEqual(await result.json(),{error:"forbidden"});
-    assert.equal(projectChecks,1);
-    assert.equal(cutoffChecks,3,
+    assert.equal(projectChecks,2);
+    assert.equal(cutoffChecks,5,
       "final project lookup must be followed by a new cutoff check");
   }finally{
     await new Promise<void>(resolve=>proxy.close(()=>resolve()));
@@ -424,17 +457,21 @@ test("Cloud read route is absent without connector and validates OAuth and paylo
   const absent=await fetch(endpoint+path,{method:"POST",headers:headers(),body:validBody});
   assert.equal(absent.status,404);
   const calls:unknown[]=[];
-  const mockRelay={async requestSummary(actor:unknown,deviceId:string,projectId:string){
-    calls.push({actor,deviceId,projectId});
-    return {kind:"connector.local_read_preview" as const,version:1 as const,
-      requestId:id,projectId,operation:"project_summary" as const,
-      files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
-  }};
+  const mockRelay={
+    prepareOwnerSummary:testPrepared,
+    async requestSummary(actor:unknown,deviceId:string,projectId:string,
+      prepared:PreparedOwnerSummary){
+      calls.push({actor,deviceId,projectId,prepared});
+      return {kind:"connector.local_read_preview" as const,version:1 as const,
+        requestId:prepared.requestId,projectId,operation:"project_summary" as const,
+        files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
+    }
+  };
   const proxy=createHttpServer(config, inventory, verify, {grants:grants, summaryRelay:()=>mockRelay});
   await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
   const origin="http://127.0.0.1:"+(proxy.address() as AddressInfo).port;
   try{
-    const send=async(token:string,body=validBody)=>fetch(origin+path,{method:"POST",headers:headers(token),body});
+    const send=(token:string,body=validBody)=>prepareHttpRead(origin,token,body);
     assert.equal((await send("invalid")).status,401);
     assert.equal((await send("test-user-b",JSON.stringify({deviceId:"bad",projectId:id}))).status,400);
     assert.equal((await send("test-user-a",JSON.stringify({deviceId:mockProject.deviceId,
@@ -443,15 +480,28 @@ test("Cloud read route is absent without connector and validates OAuth and paylo
     accessAllowed=false;
     assert.equal((await send("test-user-a")).status,403);
     accessAllowed=true;
-    const accepted=await send("test-user-a");
+    const ready=await send("test-user-a");
+    assert.equal(ready.status,200);
+    const scope=await ready.json() as PreparedOwnerSummary;
+    assert.equal(scope.ownerSub,"user-a");
+    assert.equal(scope.clientId,"test-client");
+    assert.equal(scope.deviceId,mockProject.deviceId);
+    assert.equal(scope.projectId,id);
+    assert.equal(calls.length,0,"Preparing never reads from the device");
+    const accepted=await completeHttpRead(origin,"test-user-a",
+      mockProject.deviceId,id,scope.requestId);
     assert.equal(accepted.status,200);
-    assert.equal((await accepted.json()).files.projectPresent,true);
-    assert.deepEqual(calls.at(-1),{
-      actor:{ownerSub:"user-a",clientId:"test-client",
-        accessTokenIssuedAtSeconds:(calls.at(-1) as {actor:{accessTokenIssuedAtSeconds:number}})
-          .actor.accessTokenIssuedAtSeconds},
-      deviceId:mockProject.deviceId,projectId:id
-    });
+    assert.equal((await accepted.json() as {files:{projectPresent:boolean}})
+      .files.projectPresent,true);
+    assert.equal(calls.length,1);
+    assert.equal((calls[0] as {prepared:PreparedOwnerSummary}).prepared.requestId,
+      scope.requestId);
+    assert.equal((await completeHttpRead(origin,"test-user-a",
+      mockProject.deviceId,id,scope.requestId)).status,404,
+      "A completed HTTP intent cannot be replayed");
+    assert.equal((await fetch(origin+path,{method:"POST",headers:headers(),
+      body:validBody})).status,400,
+      "Old immediate read format must be rejected");
     // Even a buggy relay must not authorize a different device merely
     // because the client has a grant for this project.
     const wrongDevice=await send("test-user-a",JSON.stringify({
@@ -462,5 +512,85 @@ test("Cloud read route is absent without connector and validates OAuth and paylo
   }finally{
     accessAllowed=true;
     await new Promise<void>(resolve=>proxy.close(()=>resolve()));
+  }
+});
+
+
+test("prepared HTTP request is token-bound, single-use, scope-bound and not a bearer grant",async()=>{
+  const observed:string[]=[];
+  const relay={
+    prepareOwnerSummary:testPrepared,
+    async requestSummary(_actor:TrustedOAuthReadIdentity,_device:string,
+      projectId:string,prepared:PreparedOwnerSummary){
+      observed.push(prepared.requestId);
+      return {kind:"connector.local_read_preview" as const,version:1 as const,
+        requestId:prepared.requestId,projectId,operation:"project_summary" as const,
+        files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
+    }
+  };
+  const verifier:Verifier=token=>token==="alternate-signed-token"
+    ? verify("test-user-a") : verify(token);
+  const proxy=createHttpServer(config,inventory,verifier,{summaryRelay:()=>relay});
+  await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
+  const origin="http://127.0.0.1:"+(proxy.address() as AddressInfo).port;
+  const start=async()=>{
+    const response=await prepareHttpRead(origin,"test-user-a",
+      JSON.stringify({deviceId:mockProject.deviceId,projectId:id}));
+    assert.equal(response.status,200);
+    return response.json() as Promise<PreparedOwnerSummary>;
+  };
+  try{
+    const intent=await start();
+    assert.equal(observed.length,0,"Preparation cannot read device metadata");
+    assert.equal((await completeHttpRead(origin,"admin-user-a",
+      mockProject.deviceId,id,intent.requestId)).status,404,
+      "Different OAuth client cannot complete another client's request");
+    assert.equal((await completeHttpRead(origin,"test-user-a",
+      mockProject.deviceId,id,intent.requestId)).status,404,
+      "A mismatched completion burns the one-use request");
+    assert.equal(observed.length,0);
+
+    const otherToken=await start();
+    assert.equal((await completeHttpRead(origin,"alternate-signed-token",
+      mockProject.deviceId,id,otherToken.requestId)).status,404,
+      "A different bearer token for the same owner/client cannot spend an intent");
+    assert.equal((await completeHttpRead(origin,"test-user-a",
+      mockProject.deviceId,id,otherToken.requestId)).status,404,
+      "A token-substitution attempt consumes the prepared reference");
+
+    const other=await start();
+    assert.equal((await completeHttpRead(origin,"test-user-a",
+      randomUUID(),id,other.requestId)).status,404,
+      "One approval cannot be redirected to another device");
+    assert.equal((await completeHttpRead(origin,"test-user-a",
+      mockProject.deviceId,id,other.requestId)).status,404);
+
+    const third=await start();
+    assert.equal((await completeHttpRead(origin,"test-user-a",
+      mockProject.deviceId,randomUUID(),third.requestId)).status,404,
+      "One approval cannot be redirected to another project");
+    assert.equal((await completeHttpRead(origin,"test-user-a",
+      mockProject.deviceId,id,third.requestId)).status,404);
+
+    const concurrent=await start();
+    const results=await Promise.all([
+      completeHttpRead(origin,"test-user-a",mockProject.deviceId,id,
+        concurrent.requestId),
+      completeHttpRead(origin,"test-user-a",mockProject.deviceId,id,
+        concurrent.requestId)
+    ]);
+    assert.deepEqual(results.map(x=>x.status).sort(),[200,404]);
+    assert.deepEqual(observed,[concurrent.requestId]);
+    assert.equal((await completeHttpRead(origin,"test-user-a",
+      mockProject.deviceId,id,concurrent.requestId)).status,404);
+
+    const noPreparation=await fetch(origin+summaryPath,{
+      method:"POST",headers:headers(),
+      body:JSON.stringify({deviceId:mockProject.deviceId,projectId:id})
+    });
+    assert.equal(noPreparation.status,400,
+      "Legacy direct read payload cannot dispatch a connector request");
+  }finally{
+    await new Promise<void>(r=>proxy.close(()=>r()));
   }
 });

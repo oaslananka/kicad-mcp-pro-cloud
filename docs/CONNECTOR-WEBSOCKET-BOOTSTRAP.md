@@ -625,3 +625,42 @@ physical passkey, or verified operator. The existing issuer still requires
 confirmation inside its 30-second expiry; human usability of that window
 must be accepted with a real device. No production `ownerConsent` port
 is wired and the connector remains OFF.
+
+### Two-step OAuth HTTP bridge (draft-only, fail closed)
+
+The Cloud HTTP router now supports exactly two bearer-authenticated endpoints
+**only when the disabled-by-default connector relay is explicitly supplied**:
+
+1. `POST /api/v1/connector/project-summary/prepare` — strict JSON
+   `{deviceId,projectId}`. A verified `projects:read` OAuth access token,
+   token cutoff and current owner/client project-device binding are checked
+   before the server asks a ready connector to reserve a one-use owner intent.
+   The server returns the bounded request ID plus exact displayed owner,
+   OAuth client, device, project, origin, operation and expiry. No device
+   read is dispatched and **no owner approval is created** at this stage.
+2. `POST /api/v1/connector/project-summary` — strict JSON
+   `{deviceId,projectId,requestId}`. The server looks up the **original
+   opaque intent object retained only in memory**, tied to the *same
+   OAuth bearer token* (SHA-256 digest only in memory), owner, client, token
+   issue time, device and project. It atomically burns the mapping before
+   dispatch. Only then can `requestSummary(...,prepared)` independently
+   consume the exact WebAuthn owner-approved PostgreSQL one-shot receipt.
+   Existing JWT expiry, token cutoff, device grant, and post-read checks
+   still run before any metadata bytes leave Cloud.
+
+The old two-field direct HTTP read body now returns HTTP 400. A stolen,
+copied or guessed request ID **alone** cannot authorize a read; a different
+signed token for the same owner/client also cannot spend it. A mismatched
+attempt with the same request ID burns that mapping; concurrent completions
+cannot both dispatch. Pending references are monotonic-time bounded to at
+most 30 seconds and capped at 128 per HTTP server process. An HTTP restart
+drops all pending references, so an old request **must never be resumed**
+through a new instance. This is intentionally an in-memory, single-instance
+draft; multi-instance distribution is not supported.
+
+HTTP tests verify token substitution, OAuth client swapping, altered
+project/device scope, replay, parallel completion and post-read revocation.
+A passing HTTP test with a synthetic relay is **not a substitute for a
+real human passkey approval receipt**. No public independent owner review
+service or real OAuth client/passkey is deployed, and `main.ts` does not
+supply an owner consent verifier; live `remoteConnector` remains OFF.
