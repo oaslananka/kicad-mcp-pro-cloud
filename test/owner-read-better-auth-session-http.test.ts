@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {createHmac,randomBytes,randomUUID} from "node:crypto";
 import {execFileSync} from "node:child_process";
 import {mkdtemp,readFile,rm} from "node:fs/promises";
-import {createServer,type Server} from "node:https";
+import type {Server} from "node:https";
 import {request as httpsRequest} from "node:https";
 import {tmpdir} from "node:os";
 import path from "node:path";
@@ -10,10 +10,8 @@ import {test} from "node:test";
 import {createIdentity} from "../src/identity.js";
 import {createIndependentOwnerSessionVerifier}
   from "../src/owner-read-better-auth-session.js";
-import {createOwnerRegistrationHandler}
-  from "../src/owner-read-registration-http.js";
-import {createOwnerPasskeyEnrollmentPageHandler}
-  from "../src/owner-read-enrollment-ui.js";
+import {createOwnerAcceptanceServer}
+  from "../src/owner-acceptance-server.js";
 import type {PgOwnerReadPasskeyRegistration}
   from "../src/owner-read-passkey-registration.js";
 import {inIsolatedDatabase} from "./isolated-db.js";
@@ -62,16 +60,12 @@ test("real Better Auth session gates standalone HTTPS owner page and registratio
           },
           complete:async()=> "denied" as const
         } as unknown as PgOwnerReadPasskeyRegistration;
-        const page=createOwnerPasskeyEnrollmentPageHandler(authority,verify);
-        const registration=createOwnerRegistrationHandler(mock,authority,verify);
-        server=createServer({
-          key:await readFile(key),cert:await readFile(cert)
-        },(req,res)=>{void (async()=>{
-          if(req.url==="/owner-passkey/register"){
-            await page(req,res);return;
-          }
-          await registration(req,res);
-        })().catch(()=>{if(!res.headersSent)res.writeHead(403);res.end();});});
+        server=createOwnerAcceptanceServer({
+          authorityOrigin:authority,identity,sessionVerifier:verify,
+          registration:mock,
+          tls:{key:await readFile(key),cert:await readFile(cert)},
+          clientScript:Buffer.from("/* owner browser script test fixture */".padEnd(130," "))
+        });
         await new Promise<void>(resolve=>server!.listen(0,"127.0.0.1",resolve));
         const a=server.address();
         assert.ok(a&&typeof a!=="string");
@@ -98,6 +92,19 @@ test("real Better Auth session gates standalone HTTPS owner page and registratio
             req.on("error",reject);
             req.end(body?JSON.stringify(body):undefined);
           });
+        const health=await invoke("/health","GET");
+        assert.equal(health.status,200);
+        assert.deepEqual(JSON.parse(health.body),{
+          status:"acceptance_only",registration:"inactive_only",
+          activation:"disabled",approval:"disabled",connector:"disabled"
+        });
+        assert.equal((await invoke("/sign-in","GET")).status,200,
+          "Existing Better Auth social login is reachable");
+        assert.equal((await invoke("/owner-passkey/register/client.js","GET")).status,200);
+        assert.equal((await invoke("/api/auth/oauth2/token","GET")).status,404,
+          "Owner acceptance service must not offer MCP token issuance");
+        assert.equal((await invoke("/api/v1/connector/ws","GET")).status,404,
+          "Owner acceptance service cannot expose connector sockets");
         assert.equal((await invoke("/owner-passkey/register","GET")).status,403);
         assert.equal((await invoke("/owner-passkey/register","GET",
           cookie,undefined,{Host:"spoofed.example.test"})).status,403);

@@ -81,3 +81,58 @@ change follows from a passing *synthetic* test.
 
 No production writes, DNS/OAuth app creation, support tickets, emails or
 changes to another repository are authorized by this document.
+
+## Independent owner service acceptance executable (draft-only)
+
+The Cloud draft now contains a **separate HTTPS acceptance listener**, not a
+production MCP route:
+
+- `src/owner-acceptance-server.ts`: isolated first-party Better Auth social
+  sign-in, session check and **inactive-only** passkey registration.
+- `src/owner-acceptance-cli.ts`: explicit-secret, loopback-only entry point.
+  Build with `npm run build`; launch with `npm run owner:acceptance` from
+  a privately configured working tree. The built client JavaScript is copied
+  into `dist` and served from that process.
+- The process exposes only `/sign-in`, `/account`,
+  `/auth/start/github`, the selected Better Auth callback/session/sign-out
+  endpoints, `/owner-passkey/register`, its two registration POSTs,
+  its JavaScript and a deliberately labeled local health endpoint.
+  **There is no activation endpoint, approval-issuance API, WebSocket
+  upgrade or KiCad read on this acceptance listener.**
+- `test/owner-read-better-auth-session-http.test.ts` exercises the **actual
+  composed HTTPS server**, an isolated Better Auth session and registration
+  handler. It verifies signed owner session, wrong Host, invalid CSRF and
+  session revocation; rejects `/api/auth/oauth2/token` and connector routes.
+
+The launcher rejects missing configuration, unsafe DB privileges, reusing
+the identity DB credentials for registration, non-HTTPS origins and weak
+owner/CSRF parameters. **No secrets were provisioned or services started
+on any real shared host by this change.** Required runtime configuration
+is provided **only through an approved private secret manager**:
+
+| Key | Purpose |
+| --- | --- |
+| `OWNER_ACCEPTANCE_ORIGIN` | Distinct exact HTTPS origin for the owner authority |
+| `OWNER_ACCEPTANCE_PORT` | Dedicated TLS listener port (1024–65535), bound to `127.0.0.1` |
+| `OWNER_ACCEPTANCE_TLS_CERT_FILE`, `OWNER_ACCEPTANCE_TLS_KEY_FILE` | Trusted certificate and key readable by the owner listener |
+| `OWNER_ACCEPTANCE_IDENTITY_DB_URL` | Isolated Better Auth identity database with migrated tables |
+| `OWNER_ACCEPTANCE_REGISTRATION_DB_URL` | **Different** least-privilege DB account for 013–018 passkey tables |
+| `OWNER_ACCEPTANCE_GITHUB_CLIENT_ID`, `OWNER_ACCEPTANCE_GITHUB_CLIENT_SECRET` | Independently registered GitHub OAuth app; callback `<owner-origin>/api/auth/callback/github` |
+| `OWNER_ACCEPTANCE_BETTER_AUTH_SECRET` | Independent Better Auth signing/encryption secret |
+| `OWNER_ACCEPTANCE_OWNER_SUB` | Exact approved identity user ID; all other accounts denied enrollment |
+| `OWNER_ACCEPTANCE_CSRF_KEY` | Independent 32+-byte random base64url key |
+
+A separate, explicitly reviewed TLS-preserving ingress route would be
+necessary for a remote OAuth provider to reach a loopback listener; the
+current Cloudflare/production ingress is **not** automatically reused,
+modified or approved. For first owner bootstrap, a deliberately nonmatching
+allowlisted ID may be used while authenticating an account; inspect that
+account's own `/api/auth/get-session` over a trusted connection, configure
+its actual verified `user.id`, then restart the listener. No passkey
+registration may succeed while the owner allowlist does not match.
+
+This is an executable step toward real enrollment, **not successful human
+OAuth sign-in/physical passkey acceptance**. Only a real owner performing a
+login and biometric/PIN verified browser registration against the
+independent host can close those blockers. No environment secrets, OAuth
+apps, DNS, physical tokens or production DB roles are automatically created.

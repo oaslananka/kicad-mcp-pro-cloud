@@ -33,7 +33,8 @@ export class PgOwnerReadPasskeyRegistration{
   constructor(private readonly db:Pool,private readonly authorityOrigin:string){
     this.rpID=validOrigin(authorityOrigin).hostname;
   }
-  private async authorized():Promise<boolean>{
+  /** Startup preflight and per-request enforcement of the same DB role fence. */
+  async verifyRestrictedRole():Promise<boolean>{
     const query=await this.db.query<{allowed:boolean}>(
       "SELECT "+
       "has_table_privilege(current_user,'owner_read_passkey_registrations','INSERT')"+
@@ -48,7 +49,7 @@ export class PgOwnerReadPasskeyRegistration{
   async begin(ownerSub:string,requestId:string){
     if(!UUID.test(requestId)||typeof ownerSub!=="string"||
        ownerSub.length<1||ownerSub.length>256||
-       !await this.authorized())return null;
+       !await this.verifyRestrictedRole())return null;
     const registered=await this.db.query<{credential_id:string}>(
       "SELECT credential_id FROM owner_read_passkeys WHERE owner_sub=$1",
       [ownerSub]);
@@ -74,7 +75,7 @@ export class PgOwnerReadPasskeyRegistration{
     response:RegistrationResponseJSON):Promise<PasskeyRegistrationResult>{
     if(!UUID.test(requestId)||typeof ownerSub!=="string"||
        ownerSub.length<1||ownerSub.length>256||
-       !await this.authorized())return "denied";
+       !await this.verifyRestrictedRole())return "denied";
     const conn=await this.db.connect();
     let started=false;
     try{
