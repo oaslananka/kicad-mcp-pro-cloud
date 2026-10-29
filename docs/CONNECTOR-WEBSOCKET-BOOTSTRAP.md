@@ -588,3 +588,33 @@ Auth users inserted into disposable PostgreSQL, NOT a real human's OAuth
 sign-in, physical passkey, public owner issuer, or local KiCad acceptance.
 The independent owner ID/key/provider setup and enrollment remain
 release-blocking; PR #64 stays DRAFT and `remoteConnector` stays OFF.
+
+### Prepared owner consent before local read (draft-only API)
+
+A real owner cannot reliably review and sign a passkey confirmation inside
+the local read's existing **8-second** consent-consumption budget. The
+connector now exposes a server-side `prepareOwnerSummary` step returning
+one immutable, randomly assigned `requestId` and exact owner, OAuth
+client, device, project, origin, `project_summary`, and 30-second expiry.
+It is scoped to the currently authenticated ready socket. Nothing is
+sent to the device at preparation time.
+
+A subsequent `requestSummary(oauth,deviceId,projectId,prepared)` accepts
+only that **same in-memory intent object**, still under the same authenticated
+socket and exact owner/client/project/device; it burns the preparation on
+attempt. Cloning or modifying its JSON, replaying its reference, swapping
+OAuth clients, disconnecting the device, or calling the legacy direct
+dispatch while an intent is pending cannot authorize that reservation.
+Even the original intent is **not sufficient to read**: the independently
+authenticated owner authority must create the exact one-time PostgreSQL
+approval receipt, which the connector consumes before the existing
+short-lived device read (8-second wire deadline and revocation recheck).
+
+The existing short local read/DB deadlines are unchanged. This separates
+human review preparation from device dispatch, **but is NOT production
+authorization**. It is only a local connector API without a public
+trusted OAuth request-preparation route, deployed owner issuer, real
+physical passkey, or verified operator. The existing issuer still requires
+confirmation inside its 30-second expiry; human usability of that window
+must be accepted with a real device. No production `ownerConsent` port
+is wired and the connector remains OFF.

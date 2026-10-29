@@ -23,6 +23,11 @@ export type OwnerReadConsentPort={
     requestId:string;origin:string;operation:"project_summary";expiresAtUnixMs:number;
   }>)=>Promise<boolean>;
 };
+export type PreparedOwnerSummary=Readonly<{
+  requestId:string;ownerSub:string;clientId:string;deviceId:string;
+  projectId:string;origin:string;operation:"project_summary";
+  expiresAtUnixMs:number;
+}>;
 type State="new"|"device_challenge"|"session_challenge"|"ready"|"closed";
 export type SummaryReadResult={
   kind:"connector.local_read_preview";version:1;requestId:string;
@@ -101,8 +106,11 @@ export function attachConnectorWebSocket(
     maxConnections?:number;
     sourceOf:RequestSourceResolver;
   }
-):{close:()=>Promise<void>;requestSummary:(oauth:TrustedOAuthReadIdentity,
-  deviceId:string,projectId:string)=>Promise<SummaryReadResult|null>}{
+):{close:()=>Promise<void>;
+  prepareOwnerSummary:(oauth:TrustedOAuthReadIdentity,deviceId:string,
+    projectId:string)=>PreparedOwnerSummary|null;
+  requestSummary:(oauth:TrustedOAuthReadIdentity,deviceId:string,
+    projectId:string,prepared?:PreparedOwnerSummary)=>Promise<SummaryReadResult|null>}{
   const wss=new WebSocketServer({noServer:true,perMessageDeflate:false,
     maxPayload:1024,clientTracking:true});
   const sockets=new Set<WebSocket>();
@@ -113,6 +121,10 @@ export function attachConnectorWebSocket(
   // Per-device throttle limits challenge reservation from self-claimed IDs.
   // Distributed DoS limits are still required before feature activation.
   const deviceWindows=new Map<string,{start:number,count:number}>();
+  const preparedIntents=new WeakMap<PreparedOwnerSummary,{
+    socket:WebSocket;scope:string;deadline:number;
+  }>();
+  const reservedSockets=new WeakMap<WebSocket,PreparedOwnerSummary>();
   let stopped=false;
   const waitingOAuth=new WeakMap<PendingRead,TrustedOAuthReadIdentity>();
 
@@ -334,21 +346,82 @@ export function attachConnectorWebSocket(
       if(now-b.start>=MINUTE)deviceWindows.delete(id);
   },30_000);
   heartbeat.unref();
+  /**
+   * Prepare the exact owner-facing intent BEFORE a browser WebAuthn ceremony.
+   * Server-side only: no Cloud HTTP route and no bearer-token semantics.
+   */
+  function prepareOwnerSummary(oauth:TrustedOAuthReadIdentity,
+    deviceId:string,projectId:string):PreparedOwnerSummary|null{
+    if(stopped||!options.ownerConsent||!oauth||
+       typeof oauth.ownerSub!=="string"||!oauth.ownerSub||
+       typeof oauth.clientId!=="string"||!oauth.clientId||
+       !/^[0-9a-f-]{36}$/i.test(deviceId)||
+       !/^[0-9a-f-]{36}$/i.test(projectId))return null;
+    const active=readyDevices.get(socketKey(oauth.ownerSub,deviceId));
+    if(!active||active.entry.phase!=="ready"||active.entry.readSent||
+       active.entry.awaiting||active.socket.readyState!==WebSocket.OPEN||
+       (active.entry.sessionDeadline??0)-performance.now()<40_000||
+       reservedSockets.has(active.socket))return null;
+    const intent:PreparedOwnerSummary=Object.freeze({
+      requestId:randomUUID(),ownerSub:oauth.ownerSub,clientId:oauth.clientId,
+      deviceId,projectId,origin:options.publicOrigin,
+      operation:"project_summary",expiresAtUnixMs:Date.now()+30_000
+    });
+    preparedIntents.set(intent,{
+      socket:active.socket,
+      scope:JSON.stringify([oauth.ownerSub,oauth.clientId,deviceId,projectId]),
+      deadline:performance.now()+30_000
+    });
+    reservedSockets.set(active.socket,intent);
+    const timeout=setTimeout(()=>{
+      if(reservedSockets.get(active.socket)===intent)
+        reservedSockets.delete(active.socket);
+    },30_000);
+    timeout.unref();
+    return intent;
+  }
+
   async function requestSummary(oauth:TrustedOAuthReadIdentity,deviceId:string,
-    projectId:string):Promise<SummaryReadResult|null>{
+    projectId:string,prepared?:PreparedOwnerSummary):Promise<SummaryReadResult|null>{
     if(stopped||!options.ownerConsent||!oauth||typeof oauth.ownerSub!=="string"||
       !/^[0-9a-f-]{36}$/i.test(deviceId)||
       !/^[0-9a-f-]{36}$/i.test(projectId))return null;
     const active=readyDevices.get(socketKey(oauth.ownerSub,deviceId));
     if(!active)return null;
     const {socket,entry}=active;
+    let requestId:string=randomUUID();
+    let ownerExpiresAtUnixMs=Date.now()+30_000;
+    let ownerExpiresAtMonotonic=performance.now()+30_000;
+    if(prepared!==undefined){
+      if(!prepared||typeof prepared!=="object")return null;
+      const reserved=preparedIntents.get(prepared);
+      if(!reserved)return null;
+      // A prepared consent identity can be presented only once, even if
+      // its object was paired with a different OAuth client or device.
+      preparedIntents.delete(prepared);
+      if(reservedSockets.get(reserved.socket)===prepared)
+        reservedSockets.delete(reserved.socket);
+      if(reserved.socket!==socket||
+         reserved.scope!==JSON.stringify([
+           oauth.ownerSub,oauth.clientId,deviceId,projectId
+         ])||
+         prepared.ownerSub!==oauth.ownerSub||
+         prepared.clientId!==oauth.clientId||
+         prepared.deviceId!==deviceId||prepared.projectId!==projectId||
+         prepared.origin!==options.publicOrigin||
+         prepared.operation!=="project_summary"||
+         reserved.deadline<=performance.now()||
+         prepared.expiresAtUnixMs<=Date.now())return null;
+      requestId=prepared.requestId;
+      ownerExpiresAtUnixMs=prepared.expiresAtUnixMs;
+      ownerExpiresAtMonotonic=reserved.deadline;
+    }else if(reservedSockets.has(socket)){
+      return null; // Do not bypass pending explicit approval preparation.
+    }
     if(entry.phase!=="ready"||entry.readSent||entry.awaiting||
       socket.readyState!==WebSocket.OPEN||
       (entry.sessionDeadline??0)-performance.now()<10_000)return null;
     entry.readSent=true; // Reserve before any async authorization awaits.
-    const requestId=randomUUID();
-    const ownerExpiresAtUnixMs=Date.now()+30_000;
-    const ownerExpiresAtMonotonic=performance.now()+30_000;
     // A registered verifier must consume a freshly owner-authenticated,
     // one-shot assertion; OAuth and device signatures cannot replace it.
     let consentTimer:ReturnType<typeof setTimeout>|undefined;
@@ -441,7 +514,7 @@ export function attachConnectorWebSocket(
     });
   }
 
-  return {requestSummary,close:async()=>{
+  return {prepareOwnerSummary,requestSummary,close:async()=>{
     if(stopped)return;
     stopped=true;
     clearInterval(heartbeat);

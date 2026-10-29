@@ -211,8 +211,36 @@ test("authenticated Cloud socket rejects revocation and expired reads after wall
         const ready=await send(ws,{kind:"connector.session_proof",version:1,signature});
         assert.equal(ready.kind,"connector.ready");
         const oauth={ownerSub:owner,clientId,accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)};
+        // First publish a precise server-issued intent for the human
+        // approval ceremony. Nothing is sent to the device yet.
+        let prepared=attached.prepareOwnerSummary(oauth,device,project);
+        assert.ok(prepared,"Ready device can reserve a one-use owner intent");
+        assert.equal(prepared.operation,"project_summary");
+        assert.equal(prepared.ownerSub,owner);
+        assert.equal(prepared.clientId,clientId);
+        assert.equal(prepared.deviceId,device);
+        assert.equal(prepared.projectId,project);
+        assert.equal(attached.prepareOwnerSummary(oauth,device,project),null,
+          "Only one outstanding intent per socket is allowed");
+        assert.equal(await attached.requestSummary(oauth,device,project),null,
+          "Legacy dispatch cannot bypass an unapproved reservation");
+        assert.equal(await attached.requestSummary(oauth,device,project,
+          {...prepared}),null,"A copied intent is not an authorization token");
+        if(revocation==="none"){
+          // An exact legitimate reservation cannot be rebound to another
+          // OAuth client; even the original reference is then burned.
+          assert.equal(await attached.requestSummary(
+            {...oauth,clientId:"untrusted-other-client"},device,project,prepared),
+            null,"Wrong OAuth client must not consume a signed owner intent");
+          assert.equal(await attached.requestSummary(oauth,device,project,prepared),
+            null,"Wrong-client attempt must permanently burn that intent");
+          const next=attached.prepareOwnerSummary(oauth,device,project);
+          assert.ok(next,"A fresh explicit owner decision needs a new intent");
+          assert.notEqual(next.requestId,prepared.requestId);
+          prepared=next;
+        }
         const outbound=waitMessage(ws);
-        const pending=attached.requestSummary(oauth,device,project);
+        const pending=attached.requestSummary(oauth,device,project,prepared);
         const frame=await outbound;
         assert.equal(frame.kind,"connector.authorized_read");
         assert.equal(frame.sequence,1);
@@ -220,6 +248,10 @@ test("authenticated Cloud socket rejects revocation and expired reads after wall
         assert.equal(request.kind,"connector.read_request");
         assert.equal(request.operation,"project_summary");
         assert.equal(request.projectId,project);
+        assert.equal(request.requestId,prepared.requestId,
+          "WSS request must match exact reviewed owner intent");
+        assert.equal(await attached.requestSummary(oauth,device,project,prepared),
+          null,"Prepared owner intent is single-use");
         if(revocation==="grant"){
           await db.query("UPDATE project_client_grants SET enabled=false WHERE project_id=$1",
             [project]);
