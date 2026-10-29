@@ -1,10 +1,47 @@
 import assert from "node:assert/strict";
-import {randomUUID} from "node:crypto";
+import {randomBytes,randomUUID} from "node:crypto";
 import {test} from "node:test";
+import {Pool} from "pg";
+import type {Pool as PoolType} from "pg";
 import {inIsolatedDatabase} from "./isolated-db.js";
 import {PgOwnerReadApprovalLedger} from "../src/owner-read-approval-ledger.js";
 
 const url=process.env.TEST_DATABASE_URL;
+
+/** Disposable PostgreSQL role boundary: the issuer fixture uses the schema
+ * owner, while the Cloud consumer may SELECT and UPDATE consumed_at only.
+ * Credentials and test roles exist exclusively in isolated PostgreSQL 17.
+ */
+async function withRestrictedConsumer(
+  admin:PoolType,action:(consumer:PoolType)=>Promise<void>
+):Promise<void>{
+  const role="fixture_receipt_"+randomBytes(8).toString("hex");
+  const password=randomBytes(20).toString("hex");
+  const schema=(await admin.query<{schema:string}>(
+    "SELECT current_schema() AS schema")).rows[0]?.schema;
+  if(!schema||!/^fixture_[a-f0-9]{18}$/.test(schema))throw Error("Unsafe test schema");
+  const roleId='"'+role+'"',table='"'+schema+'".owner_read_approvals';
+  await admin.query("CREATE ROLE "+roleId+" LOGIN PASSWORD '"+password+"'");
+  let consumer:PoolType|undefined;
+  try{
+    await admin.query("GRANT USAGE ON SCHEMA "+'"'+schema+'"'+" TO "+roleId);
+    await admin.query("GRANT SELECT ON "+table+" TO "+roleId);
+    await admin.query("GRANT UPDATE(consumed_at) ON "+table+" TO "+roleId);
+    const target=new URL(url!);
+    target.username=role;
+    target.password=password;
+    target.searchParams.set("options","-c search_path="+schema);
+    consumer=new Pool({connectionString:target.toString(),max:16});
+    const connected=await consumer.query<{who:string}>(
+      "SELECT current_user AS who");
+    assert.equal(connected.rows[0]?.who,role);
+    await action(consumer);
+  }finally{
+    await consumer?.end();
+    await admin.query("DROP OWNED BY "+roleId);
+    await admin.query("DROP ROLE "+roleId);
+  }
+}
 const scope=()=>({
   oauth:{ownerSub:"verified-owner",clientId:"verified-client",accessTokenIssuedAtSeconds:1760000000},
   deviceId:randomUUID(),projectId:randomUUID(),requestId:randomUUID(),
@@ -15,7 +52,8 @@ const scope=()=>({
 test("trusted owner approval receipt is consumed once across competing workers",
   {skip:!url},async()=>{
   await inIsolatedDatabase(url!,["013_owner_read_approvals.pgsql"],async db=>{
-    const verifier=new PgOwnerReadApprovalLedger(db);
+    await withRestrictedConsumer(db,async consumer=>{
+    const verifier=new PgOwnerReadApprovalLedger(consumer);
     const agreed=scope();
     assert.equal(await verifier.consume(agreed),false,"missing assertion must deny");
     // Synthetic fixture only; no API/service writes trusted approvals yet.
@@ -30,13 +68,15 @@ test("trusted owner approval receipt is consumed once across competing workers",
     const row=await db.query("SELECT consumed_at FROM owner_read_approvals WHERE request_id=$1",
       [agreed.requestId]);
     assert.ok(row.rows[0]?.consumed_at);
+    });
   });
 });
 
 test("bound scope, missing receipt, expiry and malformed caller fail closed",
   {skip:!url},async()=>{
   await inIsolatedDatabase(url!,["013_owner_read_approvals.pgsql"],async db=>{
-    const verifier=new PgOwnerReadApprovalLedger(db);
+    await withRestrictedConsumer(db,async consumer=>{
+    const verifier=new PgOwnerReadApprovalLedger(consumer);
     const agreed=scope();
     await db.query("INSERT INTO owner_read_approvals "+
       "(request_id,owner_sub,client_id,device_id,project_id,cloud_origin,operation,expires_at) "+
@@ -65,5 +105,46 @@ test("bound scope, missing receipt, expiry and malformed caller fail closed",
     await db.query("UPDATE owner_read_approvals SET expires_at=clock_timestamp()-interval '1 second',"+
       "issued_at=clock_timestamp()-interval '5 seconds' WHERE request_id=$1",[expired.requestId]);
     assert.equal(await verifier.consume(expired),false,"expired DB approval denied");
+    });
+  });
+});
+
+test("consumer cannot issue, rewrite, delete or truncate owner decisions; owner role cannot consume",
+  {skip:!url},async()=>{
+  await inIsolatedDatabase(url!,["013_owner_read_approvals.pgsql"],async db=>{
+    await withRestrictedConsumer(db,async consumer=>{
+      const agreed=scope();
+      await db.query("INSERT INTO owner_read_approvals "+
+        "(request_id,owner_sub,client_id,device_id,project_id,cloud_origin,operation,expires_at) "+
+        "VALUES($1,$2,$3,$4,$5,$6,$7,to_timestamp($8::double precision/1000))",
+        [agreed.requestId,agreed.oauth.ownerSub,agreed.oauth.clientId,
+          agreed.deviceId,agreed.projectId,agreed.origin,agreed.operation,
+          agreed.expiresAtUnixMs]);
+      const forbidden=[
+        ()=>consumer.query("INSERT INTO owner_read_approvals "+
+          "(request_id,owner_sub,client_id,device_id,project_id,cloud_origin,operation,expires_at) "+
+          "VALUES($1,$2,$3,$4,$5,$6,$7,to_timestamp($8::double precision/1000))",
+          [randomUUID(),agreed.oauth.ownerSub,agreed.oauth.clientId,
+            agreed.deviceId,agreed.projectId,agreed.origin,agreed.operation,
+            agreed.expiresAtUnixMs]),
+        ()=>consumer.query("UPDATE owner_read_approvals SET owner_sub='forged' WHERE request_id=$1",
+          [agreed.requestId]),
+        ()=>consumer.query("DELETE FROM owner_read_approvals WHERE request_id=$1",
+          [agreed.requestId]),
+        ()=>consumer.query("TRUNCATE owner_read_approvals")
+      ];
+      for(const attempt of forbidden){
+        await assert.rejects(attempt(),(err:unknown)=>
+          Boolean(err&&typeof err==="object"&&"code" in err&&err.code==="42501"));
+      }
+      const operator=new PgOwnerReadApprovalLedger(db);
+      assert.equal(await operator.consume(agreed),false,
+        "A privileged table owner must not consume or forge owner approvals");
+      const reader=new PgOwnerReadApprovalLedger(consumer);
+      assert.equal(await reader.consume(agreed),true,
+        "Least-privileged reader may atomically burn one real fixture receipt");
+      assert.equal(await reader.consume(agreed),false,
+        "Duplicate consumption must fail");
+    });
   });
 });

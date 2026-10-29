@@ -222,6 +222,27 @@ mismatch and expiry denial. The future owner authority must authenticate user
 presence and protect the database's issuance privilege independently; a
 same-UID agent with database write access is NOT trusted.
 
+**Approval receipt database privilege separation (Cloud draft only):**
+`PgOwnerReadApprovalLedger.consume` now also refuses to consume a receipt when
+its active PostgreSQL identity can insert/delete/truncate approvals or update
+any approval identity, scope or expiry field. This includes a table owner or
+superuser, even if an otherwise correctly bound row exists. A future consumer
+credential must be a distinct, non-owner PostgreSQL role with schema USAGE,
+table SELECT and column-specific UPDATE on `consumed_at` only; it must not
+inherit issuance privileges or have elevated role administration rights.
+The independent, genuinely human-authenticated issuer must use a different
+isolated principal, and must have its own reviewed write restrictions.
+
+The synthetic PostgreSQL regression provisions a disposable distinct role,
+verifies INSERT, DELETE, TRUNCATE and identity-field UPDATE are denied by SQL,
+shows table-owner consumption fails closed, and proves legitimate one-time
+consumption and concurrent replay denial still work. **No production roles,
+grants, credentials, migrations or runtime wiring were created or changed.**
+The future privilege provisioning and actual human-presence authenticator
+remain unimplemented release blockers; the Cloud socket continues to reject
+reads without an independently authorized issuer.
+
+
 **No real owner verification port, public enrollment, credential or user
 presence authenticator has been implemented.** Only synthetic test fixtures
 inject a port that returns true to exercise the existing transport/grant
