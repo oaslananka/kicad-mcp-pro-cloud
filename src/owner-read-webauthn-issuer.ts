@@ -21,19 +21,26 @@ type Challenge={
 type Credential={owner_sub:string;public_key:Buffer;sign_count:string;enabled:boolean};
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CREDENTIAL_ID=/^[A-Za-z0-9_-]{24,1024}$/;
-function checkIntent(intent:OwnerReadApprovalIntent,now:number):string|null{
+function checkIntent(intent:OwnerReadApprovalIntent,now:number):boolean{
   if(!intent||!UUID.test(intent.requestId)||!UUID.test(intent.deviceId)||
     !UUID.test(intent.projectId)||
     typeof intent.ownerSub!=="string"||!intent.ownerSub||intent.ownerSub.length>256||
     typeof intent.clientId!=="string"||!intent.clientId||intent.clientId.length>1024||
     !Number.isSafeInteger(intent.expiresAtUnixMs)||
-    intent.expiresAtUnixMs-now<5_000||intent.expiresAtUnixMs-now>30_000)return null;
+    intent.expiresAtUnixMs-now<5_000||intent.expiresAtUnixMs-now>30_000)return false;
   try{
     const url=new URL(intent.origin);
     return url.protocol==="https:"&&url.origin===intent.origin&&
       url.pathname==="/"&&!url.username&&!url.password&&!url.search&&!url.hash&&
-      intent.origin.length<=256?url.hostname:null;
-  }catch{return null;}
+      intent.origin.length<=256;
+  }catch{return false;}
+}
+function validAuthorityOrigin(input:string):URL{
+  const uri=new URL(input);
+  if(uri.protocol!=="https:"||uri.origin!==input||
+    uri.pathname!=="/"||uri.search||uri.hash||uri.username||uri.password||
+    input.length>256)throw Error("Passkey issuer requires exact HTTPS authority origin");
+  return uri;
 }
 function digest(challenge:string):Buffer|null{
   if(!/^[A-Za-z0-9_-]{43}$/.test(challenge))return null;
@@ -43,11 +50,13 @@ function digest(challenge:string):Buffer|null{
 }
 
 export class PgOwnerReadWebAuthnIssuer{
-  constructor(private readonly db:Pool){}
+  private readonly authorityRPID:string;
+  constructor(private readonly db:Pool,private readonly authorityOrigin:string){
+    this.authorityRPID=validAuthorityOrigin(authorityOrigin).hostname;
+  }
 
   async begin(intent:OwnerReadApprovalIntent,credentialId:string){
-    const rpID=checkIntent(intent,Date.now());
-    if(!rpID||!CREDENTIAL_ID.test(credentialId))return null;
+    if(!checkIntent(intent,Date.now())||!CREDENTIAL_ID.test(credentialId))return null;
     // A permissive/general application DB login is never an issuer.
     const privilege=await this.db.query<{allowed:boolean}>(
       "SELECT has_table_privilege(current_user,'owner_read_approvals','INSERT')"+
@@ -66,7 +75,7 @@ export class PgOwnerReadWebAuthnIssuer{
     const remaining=intent.expiresAtUnixMs-Date.now();
     if(remaining<5_000)return null;
     const options=await generateAuthenticationOptions({
-      rpID,allowCredentials:[{id:credentialId}],
+      rpID:this.authorityRPID,allowCredentials:[{id:credentialId}],
       userVerification:"required",timeout:remaining
     });
     const fingerprint=digest(options.challenge);
@@ -115,12 +124,11 @@ export class PgOwnerReadWebAuthnIssuer{
       if(!key?.enabled||key.owner_sub!==request.owner_sub){
         await db.query("COMMIT");open=false;return false;
       }
-      const rpID=new URL(request.cloud_origin).hostname;
       let count:number;
       try{
         const result=await verifyAuthenticationResponse({
           response:assertion,expectedChallenge:challenge,
-          expectedOrigin:request.cloud_origin,expectedRPID:rpID,
+          expectedOrigin:this.authorityOrigin,expectedRPID:this.authorityRPID,
           credential:{id:request.credential_id,publicKey:Uint8Array.from(key.public_key),
             counter:Number(key.sign_count)},
           requireUserVerification:true

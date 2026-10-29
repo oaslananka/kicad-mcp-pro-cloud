@@ -9,6 +9,7 @@ import {PgOwnerReadWebAuthnIssuer,type OwnerReadApprovalIntent}
 
 const url=process.env.TEST_DATABASE_URL;
 const origin="https://owner.example.test";
+const cloudOrigin="https://cloud.example.test";
 const owner="verified-browser-owner";
 const clientId="registered-mcp-client";
 const role="cloud_issuer_fixture";
@@ -28,7 +29,7 @@ function pair(){
 type TestKey=ReturnType<typeof pair>;
 function intent():OwnerReadApprovalIntent{
   return {requestId:randomUUID(),ownerSub:owner,clientId,
-    deviceId:randomUUID(),projectId:randomUUID(),origin,
+    deviceId:randomUUID(),projectId:randomUUID(),origin:cloudOrigin,
     expiresAtUnixMs:Date.now()+24_000};
 }
 function assertPasskey(credential:TestKey,challenge:string,options:{
@@ -96,8 +97,8 @@ test("independent issuer verifies UV passkey and exact one-use scoped read recei
       "INSERT INTO owner_read_passkeys(credential_id,owner_sub,public_key,enabled) "+
       "VALUES($1,$2,$3,true)",[key.id,owner,key.cose]);
     await withIssuerRole(admin,async restricted=>{
-      const issuer=new PgOwnerReadWebAuthnIssuer(restricted);
-      const adminIssuer=new PgOwnerReadWebAuthnIssuer(admin);
+      const issuer=new PgOwnerReadWebAuthnIssuer(restricted,origin);
+      const adminIssuer=new PgOwnerReadWebAuthnIssuer(admin,origin);
       const denied=intent();
       assert.equal(await adminIssuer.begin(denied,key.id),null,
         "Database owner/superuser is not a separately authorized issuer");
@@ -114,6 +115,8 @@ test("independent issuer verifies UV passkey and exact one-use scoped read recei
       assert.ok(options);
       assert.equal(options.userVerification,"required");
       assert.equal(options.rpId,new URL(origin).hostname);
+      assert.notEqual(options.rpId,new URL(cloudOrigin).hostname,
+        "Passkey must be scoped to independent approval authority");
       assert.deepEqual(options.allowCredentials?.map(x=>x.id),[key.id]);
       assert.equal(await issuer.approve(allowed.requestId,options.challenge,
         assertPasskey(key,options.challenge)),true,
@@ -124,7 +127,7 @@ test("independent issuer verifies UV passkey and exact one-use scoped read recei
       assert.equal(stored.rowCount,1);
       assert.deepEqual(stored.rows[0],{
         owner_sub:owner,client_id:clientId,device_id:allowed.deviceId,
-        project_id:allowed.projectId,cloud_origin:origin,operation:"project_summary"
+        project_id:allowed.projectId,cloud_origin:cloudOrigin,operation:"project_summary"
       });
       assert.equal(await issuer.approve(allowed.requestId,options.challenge,
         assertPasskey(key,options.challenge)),false,"Challenge and receipt cannot replay");

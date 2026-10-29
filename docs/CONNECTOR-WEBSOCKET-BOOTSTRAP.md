@@ -335,3 +335,44 @@ user-presence UX, request/session deadlines and authentication trust
 boundary, then test real hardware. A normal OAuth login does NOT establish
 passkey UV for each request. Merely merging this code or changing a feature
 flag must never authorize a device read.
+
+## Owner review interface (isolated Cloud draft, not enabled)
+
+`src/owner-read-approval-ui.ts` and `src/owner-read-review-client.js`
+provide a review page and **explicit** WebAuthn click flow for a separately
+authenticated issuer service. The page displays the server-verified owner,
+OAuth client, device UUID, project UUID, one permitted `project_summary`
+operation, Cloud source origin and 30-second expiry. It uses escaped text,
+no-store/no-referrer, frame rejection, and a same-origin external JavaScript
+with no silent invocation. Approve calls browser
+`navigator.credentials.get({publicKey:{...,userVerification:'required'}})`
+only after a direct click; Deny makes no approval request. The server must
+still verify the passkey UV bit and authentic signature, owner identity,
+intent, one-time challenge and current grant: display content alone is
+**not** authorization.
+
+The **approval authority HTTPS origin** is distinct from the **Cloud data
+source origin**: WebAuthn RP ID and signature origin must match the
+independent approval authority's configured origin, not a target Cloud
+host claimed by the OAuth client. A real deployment therefore needs a
+separate and browser-reachable issuer with its own owner authentication,
+passkey registration and privilege-isolated SQL writer. Neither the Cloud
+application nor a caller-supplied origin can substitute for it.
+
+`test/owner-read-approval-ui.test.ts` tests HTML escaping, scope mismatch,
+missing user verification and expiry, plus headless Chromium **virtual
+authenticator** registration and a real signed authentication assertion
+verified by SimpleWebAuthn on an isolated, self-signed local HTTPS
+test server. This browser test proves no silent approval, an actual
+explicit-click signed approval and the deny path. It does not constitute
+a real enrolled human/passkey device test and the test HTTPS server is
+not the production issuer.
+
+**No HTTP handler or approval endpoint has been installed**, and no
+issuer login, passkey credential or production database permissions have
+been provisioned. Before wiring this into any public service, independently
+review the authorization of begin() and approve(), CSRF/Origin/Fetch
+Metadata, renewal and request timeout/revocation race, user-verification
+credential enrollment and issuer deployment trust. The current Cloud
+connector's eight-second consent wait is not adequate evidence of a
+human-completable WebAuthn ceremony. Remain DRAFT and feature OFF.
