@@ -664,3 +664,33 @@ A passing HTTP test with a synthetic relay is **not a substitute for a
 real human passkey approval receipt**. No public independent owner review
 service or real OAuth client/passkey is deployed, and `main.ts` does not
 supply an owner consent verifier; live `remoteConnector` remains OFF.
+
+### Optional read-only receipt consumer role (draft-only wiring)
+
+The Cloud entry point now recognizes an **independent and default-OFF**
+`OWNER_READ_CONSUMER_ENABLED=true` configuration together with
+`OWNER_READ_CONSUMER_DATABASE_URL`. The second URL is a dedicated PostgreSQL
+login; it must be provisioned through an approved private secret manager and
+must **never** reuse the application database's login. This flag alone does
+not turn on the connector: `CONNECTOR_WS_ENABLED=true` and an exact HTTPS
+Cloud origin are separately required.
+
+At startup, the Cloud process checks both SQL sessions, resolves the same
+`owner_read_approvals` relation, requires physically different PostgreSQL
+session principals, and fails closed unless the consumer can SELECT receipts
+and UPDATE only their `consumed_at` column. An account able to INSERT,
+DELETE, TRUNCATE, update the table generally, or rewrite the receipt identity,
+scope or expiry is rejected. The consumer module has no approval issuance
+method, does not register/activate a passkey and cannot authenticate a human.
+It opens a separate small connection pool, closed with the Cloud process.
+Malformed flags, missing secrets and unsafe roles fail before the HTTP
+listener starts; the independent login is never printed.
+
+Isolated PostgreSQL tests exercise the actual restricted login and receipt
+consumption, concurrent reads, replay rejection, default OFF, application
+login reuse and malicious overprivileged roles. The independent human
+WebAuthn issuer and device operator are **still not deployed or accepted**.
+These configuration keys are preparation artifacts, not authorization to
+enable a live connector or release this DRAFT PR. The production release
+gate stays **NO-GO** until real human owner identity, physical passkey,
+independent consent issuance and KiCad device end-to-end acceptance pass.

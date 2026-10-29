@@ -5,6 +5,7 @@ import {PgConnectorSessions} from "./connector-session.js";
 import {PgConnectorReadGate} from "./connector-read-gate.js";
 import {BoundConnectorConnections} from "./connector-transport-binding.js";
 import {attachConnectorWebSocket} from "./connector-ws.js";
+import {openOwnerConsentRuntime} from "./owner-read-consumer-runtime.js";
 import {PgDeviceManagement} from "./device-management.js";
 import {PgPairingReview} from "./pairing-review.js";
 import {PgPairingDeviceAPI} from "./pairing-device-api.js";
@@ -24,6 +25,10 @@ if(wsEnabled&&!config.publicOrigin.startsWith("https://")){
   throw new Error("Connector WebSocket requires externally terminated HTTPS");
 }
 const connectorPool=(wsEnabled||Boolean(identity))?new Pool({connectionString:config.databaseUrl}):null;
+// Explicitly independent PostgreSQL role; never issue owner approvals here.
+// With the default flag OFF, reads remain disabled even if WSS is enabled.
+const ownerConsentRuntime=await openOwnerConsentRuntime(
+  process.env,config.publicOrigin,wsEnabled,connectorPool);
 const deviceManagement=identity&&connectorPool?new PgDeviceManagement(connectorPool):undefined;
 const pairingReview=identity&&connectorPool?
   new PgPairingReview(connectorPool,process.env.BETTER_AUTH_SECRET??""):undefined;
@@ -47,6 +52,7 @@ const connectorWs=wsEnabled&&connectorPool?attachConnectorWebSocket(server,{
   publicOrigin:config.publicOrigin,
   sourceOf:deviceSource!,
   proofs:new PgDeviceHandshakes(connectorPool),
+  ...(ownerConsentRuntime?{ownerConsent:ownerConsentRuntime.consent}:{}),
   connections:new BoundConnectorConnections(
     new PgConnectorSessions(connectorPool),
     new PgConnectorReadGate(connectorPool))
@@ -60,6 +66,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     void (async()=>{
       await connectorWs?.close();
+      await ownerConsentRuntime?.close();
       await new Promise<void>(resolve=>server.close(()=>resolve()));
       await connectorPool?.end();
       await inventory.close();
