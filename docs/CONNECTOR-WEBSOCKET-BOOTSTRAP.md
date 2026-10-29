@@ -376,3 +376,44 @@ Metadata, renewal and request timeout/revocation race, user-verification
 credential enrollment and issuer deployment trust. The current Cloud
 connector's eight-second consent wait is not adequate evidence of a
 human-completable WebAuthn ceremony. Remain DRAFT and feature OFF.
+
+## Passkey registration (draft-only, separate trust boundary)
+
+The independent owner-approval authority now has registration primitives
+`src/owner-read-passkey-registration.ts`, `src/owner-read-registration-http.ts`
+and append-only migration `016_owner_read_passkey_registration.pgsql`.
+No production HTTP route, issuer process or credential has been installed.
+
+The registration core generates one-time ES256 WebAuthn creation challenges
+with `userVerification: required`, checks the passkey's cryptographic
+attestation, HTTPS authority RP ID and origin, owner-bound challenge,
+120-second expiry and one-use consumption. A failed proof also burns the
+challenge. Challenge reuse, expiry, replay and incorrect origin fail closed.
+A successful registration creates a credential with `enabled=false` and
+**never** authorizes a project read. A separate, strongly authenticated
+owner/security authority must explicitly activate it after enrollment.
+
+The HTTP adapter is **not** mounted by the Cloud app. A future independent
+issuer must supply a trusted owner-session verifier returning owner subject
+and server-side session CSRF token. It rejects missing user sessions, wrong
+Origin/Fetch Metadata, CSRF mismatches, oversize JSON, non-POST requests
+and caller-controlled owner identity or request UUID. The adapter never
+accepts owner subjects from browser-submitted JSON. Deployment still
+requires a real independently authenticated owner-session implementation,
+session lifecycle, CSRF secret provisioning and rate budget.
+
+The registration database role is separate from both the approval issuer
+and read consumer: its restricted credentials may save an unactivated
+credential but cannot write `enabled=true` or issue an approval receipt.
+Tests use disposable PostgreSQL 17 roles and actual Chromium virtual
+WebAuthn registration, prove that browser-generated ES256 credentials
+remain inactive and no approval is issued, and reject forged client data,
+cross-owner completion, reused challenges, expired challenges and direct
+reset of used challenge state. The HTTP contract tests use a **synthetic**
+authenticated-session callback solely for local testing; they do not
+establish real human identity or production access.
+
+**NO-GO remains in force:** Real owner enrollment, separate identity service
+and owner activation ceremony, deployable issuer, physical KiCad acceptance,
+signed browser session verification and end-to-end production WSS remain
+unproven. Keep `CONNECTOR_WS_ENABLED` disabled and PR #64 DRAFT.
