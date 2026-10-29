@@ -136,3 +136,19 @@ OAuth sign-in/physical passkey acceptance**. Only a real owner performing a
 login and biometric/PIN verified browser registration against the
 independent host can close those blockers. No environment secrets, OAuth
 apps, DNS, physical tokens or production DB roles are automatically created.
+
+### Independent GitHub OAuth first-leg validation (synthetic client)
+
+The composed HTTPS acceptance server now has an automated real first-leg
+GitHub OAuth redirect contract in
+`test/owner-read-better-auth-session-http.test.ts`. A signed-in user
+is **not** simulated for this step: the first-party form POST is sent over
+validated local HTTPS, passed through Better Auth's actual
+`/api/auth/sign-in/social` handler, and must return **303** with a redirect
+to `https://github.com/login/oauth/authorize`. The test asserts the
+configured synthetic client ID, the exact independent issuer callback
+`<owner-origin>/api/auth/callback/github`, an issued browser-state cookie
+protected by `HttpOnly`, `Secure`, `SameSite=Lax`, and denial of forged
+Origin / direct GET. No browser state tokens, cookies or OAuth secrets are
+printed in test output. This proves **only OAuth initiation**, not a GitHub
+callback, an actual owner session, a real OAuth app or human passkey acceptance.
