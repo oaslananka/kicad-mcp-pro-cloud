@@ -694,3 +694,17 @@ These configuration keys are preparation artifacts, not authorization to
 enable a live connector or release this DRAFT PR. The production release
 gate stays **NO-GO** until real human owner identity, physical passkey,
 independent consent issuance and KiCad device end-to-end acceptance pass.
+
+### Approval issuance remains independently isolated
+
+`src/owner-read-review-http.ts` can issue a WebAuthn-backed approval
+receipt **only from a server-injected trusted intent** and a separate
+authenticated owner session. The HTTP bearer client is never trusted to
+supply that intent to the issuer, and no public enrollment or review
+endpoint is connected to the Cloud connector process. This code is
+deliberately **unmounted**, unlike the Cloud's owner-consent *consumer*.
+Before physical acceptance, a separately authenticated service-to-service
+intent transport must prove that the request matches Cloud's live
+prepared owner/OAuth/client/device/project binding; exposing a public
+`addTrustedIntent` endpoint or accepting a client's copied JSON scope
+would break the security boundary and is prohibited.

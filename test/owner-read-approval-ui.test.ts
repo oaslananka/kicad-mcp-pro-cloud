@@ -25,11 +25,12 @@ const challenge=()=>randomBytes(32).toString("base64url");
 
 test("review page shows exact scope, escapes injection and rejects non-UV/mismatched actors",
   ()=>{
+    const csrf="A".repeat(43);
     const intent=fixture(),options={
       challenge:challenge(),rpId:"localhost",userVerification:"required" as const
     };
     const html=renderOwnerReadReview({intent,options},intent.ownerSub,
-      "https://localhost:4443");
+      "https://localhost:4443",csrf);
     assert.match(html,/Approve one project summary/);
     assert.match(html,/project_summary \(presence flags only\)/);
     assert.ok(html.includes("A&lt;svg/onload=alert(1)&gt;B"));
@@ -39,15 +40,15 @@ test("review page shows exact scope, escapes injection and rejects non-UV/mismat
     assert.ok(!html.includes("onerror="));
     assert.equal(ownerReadReviewHeaders["Cache-Control"],"no-store");
     assert.match(ownerReadReviewHeaders["Content-Security-Policy"],/script-src 'self'/);
-    assert.throws(()=>renderOwnerReadReview({intent,options},"other-owner","https://localhost:4443"));
+    assert.throws(()=>renderOwnerReadReview({intent,options},"other-owner","https://localhost:4443",csrf));
     assert.throws(()=>renderOwnerReadReview({intent,options:{
-      ...options,userVerification:"preferred" as const}},intent.ownerSub,"https://localhost:4443"));
+      ...options,userVerification:"preferred" as const}},intent.ownerSub,"https://localhost:4443",csrf));
     assert.throws(()=>renderOwnerReadReview({intent,options:{
-      ...options,rpId:"untrusted.example"}},intent.ownerSub,"https://localhost:4443"));
+      ...options,rpId:"untrusted.example"}},intent.ownerSub,"https://localhost:4443",csrf));
     assert.throws(()=>renderOwnerReadReview({intent:{
-      ...intent,origin:"http://cloud.example.test"},options},intent.ownerSub,"https://localhost:4443"));
+      ...intent,origin:"http://cloud.example.test"},options},intent.ownerSub,"https://localhost:4443",csrf));
     assert.throws(()=>renderOwnerReadReview({intent:{
-      ...intent,expiresAtUnixMs:Date.now()-1},options},intent.ownerSub,"https://localhost:4443"));
+      ...intent,expiresAtUnixMs:Date.now()-1},options},intent.ownerSub,"https://localhost:4443",csrf));
   });
 
 test("Chrome virtual WebAuthn requires deliberate click, verifies UV assertion, denies cancellation",
@@ -157,7 +158,7 @@ test("Chrome virtual WebAuthn requires deliberate click, verifies UV assertion, 
       };
       lastScope=intent.requestId;
       html=renderOwnerReadReview({intent,options:assertionOptions},intent.ownerSub,
-        expectedOrigin);
+        expectedOrigin,"A".repeat(43));
       await page.goto(expectedOrigin+"/");
       assert.equal(await page.locator("#status").textContent(),"Not approved.");
       await page.waitForTimeout(200);

@@ -24,11 +24,13 @@ const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]
  * not proof of user-verified approval for this specific request.
  */
 export function renderOwnerReadReview(
-  review:OwnerReadReview,authenticatedOwner:string,authorityOrigin:string
+  review:OwnerReadReview,authenticatedOwner:string,authorityOrigin:string,
+  csrf:string
 ):string{
   const {intent,options}=review;
   const origin=new URL(intent.origin);
   const authority=new URL(authorityOrigin);
+  if(!/^[A-Za-z0-9_-]{43}$/.test(csrf))throw Error("Owner review requires session CSRF");
   if(!authenticatedOwner||authenticatedOwner!==intent.ownerSub||
      !UUID.test(intent.requestId)||!UUID.test(intent.deviceId)||
      !UUID.test(intent.projectId)||
@@ -45,7 +47,7 @@ export function renderOwnerReadReview(
   const data=literalJson({
     requestId:intent.requestId,challenge:options.challenge,
     publicKey:options,origin:authorityOrigin,
-    expiresAtUnixMs:intent.expiresAtUnixMs
+    expiresAtUnixMs:intent.expiresAtUnixMs,csrf
   });
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">

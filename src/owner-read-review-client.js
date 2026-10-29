@@ -70,7 +70,8 @@
         cache:"no-store",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-          requestId:data.requestId,challenge:data.challenge,assertion
+          requestId:data.requestId,challenge:data.challenge,
+          csrf:data.csrf,assertion
         })
       });
       lock(reply.ok?"Passkey accepted. Approval submitted.":

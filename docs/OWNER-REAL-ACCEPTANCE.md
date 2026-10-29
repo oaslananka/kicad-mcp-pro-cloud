@@ -198,3 +198,39 @@ This eliminates the gap between separate browser and separate process-start
 tests. The owner session and authenticator remain **synthetic**. No social
 provider callback, physical passkey, independent public owner deployment or
 Cloud-to-KiCad WSS acceptance has occurred, so the release remains **NO-GO**.
+
+### Independent HTTPS approval review handler (unmounted)
+
+The draft now contains `src/owner-read-review-http.ts`, a separate owner
+review handler for a **future independently deployed** HTTPS issuer.
+Unlike the passive-enrollment-only `owner-acceptance-cli`, this handler
+does **not** run or expose any production route. A trusted in-process
+caller must explicitly register one verified, exact
+owner/client/device/project/origin/request-ID intent through
+`addTrustedIntent(intent,credentialId)`; there is deliberately **no**
+public HTTP request that creates, imports, or modifies that scope.
+Trusted registration is bounded to 64 entries and a 30-second expiry.
+
+For an existing trusted request, `GET /owner-read/review?requestId=...`
+requires an independently verified owner session and renders the exact
+scope with a session-bound CSRF proof. It calls the separate least-privilege
+WebAuthn issuer to create a user-verifying authentication challenge for an
+already **enabled** owner passkey. The owner must actively click the
+approval button. Only `POST /owner-read/approval` from the exact HTTPS
+Origin, with the original authenticated owner session, correct CSRF,
+challenge and WebAuthn assertion, can ask the issuer to create one
+PostgreSQL approval receipt. Submissions consume the in-memory review
+intent once. Missing or forged session, incorrect Origin/CSRF, tampered
+passkey signatures, replayed requests and wrong owner are denied.
+The review JavaScript is included in the build output for a future
+dedicated issuer deployment; it is **not** mounted on Cloud's HTTP router.
+
+The isolated PostgreSQL/HTTPS integration test
+`test/owner-read-review-http.test.ts` validates a real restricted issuer
+login and synthetic P-256 signed WebAuthn assertion, exact SQL scope,
+session enforcement, CSRF, one-time issuance, malicious signatures and
+replay. The separate Chrome virtual authenticator UI tests continue to
+cover deliberate click and user-verification behavior. **No real OAuth
+provider session, physical passkey or independently authenticated
+Cloud-to-owner trusted intent exchange exists yet.** These tests do not
+authorize deployment, activation, merge or real local KiCad reads.
