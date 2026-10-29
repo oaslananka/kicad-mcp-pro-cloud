@@ -61,7 +61,7 @@ const scope=()=>({
 
 test("trusted owner approval receipt is consumed once across competing workers",
   {skip:!url},async()=>{
-  await inIsolatedDatabase(url!,["013_owner_read_approvals.pgsql"],async db=>{
+  await inIsolatedDatabase(url!,["013_owner_read_approvals.pgsql","014_owner_read_approval_replay_guard.pgsql"],async db=>{
     await withRestrictedConsumer(db,async consumer=>{
     const verifier=new PgOwnerReadApprovalLedger(consumer);
     const agreed=scope();
@@ -84,7 +84,7 @@ test("trusted owner approval receipt is consumed once across competing workers",
 
 test("bound scope, missing receipt, expiry and malformed caller fail closed",
   {skip:!url},async()=>{
-  await inIsolatedDatabase(url!,["013_owner_read_approvals.pgsql"],async db=>{
+  await inIsolatedDatabase(url!,["013_owner_read_approvals.pgsql","014_owner_read_approval_replay_guard.pgsql"],async db=>{
     await withRestrictedConsumer(db,async consumer=>{
     const verifier=new PgOwnerReadApprovalLedger(consumer);
     const agreed=scope();
@@ -121,7 +121,7 @@ test("bound scope, missing receipt, expiry and malformed caller fail closed",
 
 test("consumer cannot issue, rewrite, delete or truncate owner decisions; owner role cannot consume",
   {skip:!url},async()=>{
-  await inIsolatedDatabase(url!,["013_owner_read_approvals.pgsql"],async db=>{
+  await inIsolatedDatabase(url!,["013_owner_read_approvals.pgsql","014_owner_read_approval_replay_guard.pgsql"],async db=>{
     await withRestrictedConsumer(db,async consumer=>{
       const agreed=scope();
       await db.query("INSERT INTO owner_read_approvals "+
@@ -155,6 +155,15 @@ test("consumer cannot issue, rewrite, delete or truncate owner decisions; owner 
         "Least-privileged reader may atomically burn one real fixture receipt");
       assert.equal(await reader.consume(agreed),false,
         "Duplicate consumption must fail");
+      // A receipt reader is allowed to update consumed_at ONLY. Unless the
+      // database blocks resetting it, the same approval can be replayed.
+      await assert.rejects(
+        consumer.query("UPDATE owner_read_approvals SET consumed_at=NULL WHERE request_id=$1",
+          [agreed.requestId]),
+        /owner approval already consumed/
+      );
+      assert.equal(await reader.consume(agreed),false,
+        "A used receipt must remain used even after a forged reset");
     });
   });
 });

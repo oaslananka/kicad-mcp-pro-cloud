@@ -242,6 +242,18 @@ The future privilege provisioning and actual human-presence authenticator
 remain unimplemented release blockers; the Cloud socket continues to reject
 reads without an independently authorized issuer.
 
+**One-time means immutable at the database level:** migration
+`014_owner_read_approval_replay_guard.pgsql` adds a PostgreSQL
+`BEFORE UPDATE OF consumed_at` trigger. Once a receipt is consumed, even a
+consumer with the narrowly granted `UPDATE(consumed_at)` privilege cannot
+reset it to NULL or move its timestamp and reuse the receipt. Invalid
+consumption timestamps also fail closed. This is an append-only migration:
+previous `013_owner_read_approvals.pgsql` bytes/checksum remain unchanged.
+The disposable PostgreSQL role test demonstrates the replay defect against
+migration 013 alone (RED) and verifies SQL-level replay/reset rejection after
+014 (GREEN). This is not an independently authenticated approval issuer.
+
+
 
 **No real owner verification port, public enrollment, credential or user
 presence authenticator has been implemented.** Only synthetic test fixtures
