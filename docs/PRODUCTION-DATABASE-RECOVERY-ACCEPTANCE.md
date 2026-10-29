@@ -126,15 +126,21 @@ the source SHA-256, runs a full independent restore via the second host's
 own Doppler credentials, and then retains the last **three** project-owned
 ciphertexts. It does not handle any other project's backups.
 
-The per-host settings are outside Git:
+The per-host destination selectors stay in the **source deployment's
+Doppler configuration**, never in Git or a second local environment file:
 
     OFFSITE_REMOTE_SSH=<approved-user>@<trusted-private-ip>
     OFFSITE_REMOTE_DIR=/private/approved/kicad-cloud/offsite
 
-Use a mode-0600 user environment file; `scripts/install-offsite-backup-timer.sh`
-installs the one-project `systemd --user` daily timer. Run one scheduled
-service acceptance and verify retention and unit status before declaring
-automatic protection operational. If the independent machine is offline,
+When those values and the age identity/recipient are configured, the
+independent restore host and SSH trust have been verified, and the reviewed
+source worktree is clean, `scripts/install-offsite-backup-timer.sh` performs
+a fail-closed Doppler preflight and installs the one-project `systemd --user`
+daily timer. The job starts via `scripts/doppler-runtime.sh` and cannot
+silently inherit stale endpoint values from a local file. No timer is
+enabled merely by deploying the app. Run one scheduled service acceptance,
+verify its independent restore and retention, and check unit status before
+declaring automatic protection operational. If the destination is offline,
 the job **fails visibly** and must be retried; no failed backup is silently
 counted as accepted. A separate user-visible stale-backup alert is desirable.
 

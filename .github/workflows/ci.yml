@@ -43,6 +43,8 @@ jobs:
           bash -n scripts/offsite-restore-verify.sh
           bash -n scripts/offsite-backup-push.sh
           bash -n scripts/install-offsite-backup-timer.sh
+          bash -n scripts/offsite-restore-verify.sh
+          bash -n scripts/offsite-backup-push.sh
           bash -n scripts/production-deploy-if-ready.sh
           bash -n scripts/doppler-runtime.sh
           bash -n scripts/setup-vps-doppler.sh
@@ -58,6 +60,8 @@ jobs:
             echo "Restore drill accepted an unsupported action" >&2
             exit 1
           fi
+      - name: Verify Doppler-only offsite backup timer contracts (offline fixtures)
+        run: node --test scripts/test-offsite-scheduler.mjs
       - name: Validate production Compose topology and healthcheck
         run: node scripts/check-production-compose.mjs
       - name: Verify portable Doppler deployment contracts (offline fixtures)
