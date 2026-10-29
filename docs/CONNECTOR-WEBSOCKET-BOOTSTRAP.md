@@ -466,3 +466,25 @@ subsequently receives `denied`; the consumed timestamp persists.
 Persistence/credential-storage errors still roll back their transaction,
 so no partial passkey is inserted. This change is only on PR #64's
 disabled draft path, not in production.
+
+### Issuer challenge replay guard — append-only migration 017
+
+A separate PostgreSQL 17 negative test reproduced another one-use violation:
+the restricted issuer role is granted only `UPDATE(used_at)` on
+`owner_read_webauthn_challenges`. Before migration 017 it could set
+a rejected WebAuthn approval challenge's `used_at` back to NULL; this
+rearmed an already attempted proof. The older registration challenge
+table already had a comparable one-use trigger, but issuer challenges
+did not. A credential counter alone does not substitute for this fence
+(e.g. valid platform passkeys may have a zero counter).
+
+Append-only `017_owner_read_webauthn_challenge_one_use.pgsql` now
+installs a `BEFORE UPDATE OF used_at` trigger. It rejects any further
+update after consumption and invalid initial consumption timestamps,
+including NULL, timestamps before issue and at/after expiry. The
+limited-privilege issuer can still make its **first** atomic claim, but
+cannot reset or replay it even after a rejected assertion. The
+isolated test is RED against the pre-017 schema and GREEN with 017.
+All historic migrations, including 013–016, retain their original
+bytes and checksums. No production credential, socket or issuer is
+enabled by this draft-only schema.

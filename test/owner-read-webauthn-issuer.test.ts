@@ -90,7 +90,8 @@ test("independent issuer verifies UV passkey and exact one-use scoped read recei
   await inIsolatedDatabase(url!,[
     "013_owner_read_approvals.pgsql",
     "014_owner_read_approval_replay_guard.pgsql",
-    "015_owner_read_webauthn_issuer.pgsql"
+    "015_owner_read_webauthn_issuer.pgsql",
+    "017_owner_read_webauthn_challenge_one_use.pgsql"
   ],async admin=>{
     const key=pair();
     await admin.query(
@@ -160,6 +161,27 @@ test("independent issuer verifies UV passkey and exact one-use scoped read recei
           "WHERE request_id=$1",[scoped.requestId])).rows[0].n,0,attack.name);
       }
 
+      // A restricted issuer role can only UPDATE(used_at), but before
+      // migration 017 could reset a rejected proof and redeem it again.
+      const resetCandidate=intent();
+      const resetOptions=await issuer.begin(resetCandidate,key.id);
+      assert.ok(resetOptions);
+      assert.equal(await issuer.approve(resetCandidate.requestId,
+        resetOptions.challenge,
+        assertPasskey(key,resetOptions.challenge,{
+          origin:"https://wrong.example.test",count:2
+        })),false,"Original invalid WebAuthn attempt must fail");
+      await assert.rejects(
+        restricted.query(
+          "UPDATE owner_read_webauthn_challenges SET used_at=NULL "+
+          "WHERE request_id=$1",[resetCandidate.requestId]),
+        /challenge already consumed/,
+        "A limited issuer role must never reset a used challenge"
+      );
+      assert.equal(await issuer.approve(resetCandidate.requestId,
+        resetOptions.challenge,assertPasskey(key,resetOptions.challenge,{
+          count:2
+        })),false,"Invalid challenge stays used, even with a valid later signature");
       const revoked=intent();
       const revokedOptions=await issuer.begin(revoked,key.id);
       assert.ok(revokedOptions);
