@@ -300,17 +300,37 @@ function testPrepared(
   });
 }
 const summaryPath="/api/v1/connector/project-summary";
-async function prepareHttpRead(origin:string,token:string,body:string){
-  return fetch(origin+summaryPath+"/prepare",{
-    method:"POST",headers:headers(token),body
+async function postLoopbackSummary(
+  origin:string,route:"prepare"|"complete",bearer:string,body:string
+):Promise<Response>{
+  const address=new URL(origin);
+  if(address.protocol!=="http:"||address.hostname!=="127.0.0.1"||
+     !/^[0-9]{1,5}$/.test(address.port))
+    throw Error("Only the local fixture server is supported");
+  const path=route==="prepare"?summaryPath+"/prepare":summaryPath;
+  return new Promise<Response>((resolve,reject)=>{
+    const request=httpRequest({
+      hostname:"127.0.0.1",port:Number(address.port),path,
+      method:"POST",headers:headers(bearer)
+    },reply=>{
+      const chunks:Buffer[]=[];
+      reply.on("data",(part:Buffer)=>chunks.push(Buffer.from(part)));
+      reply.on("end",()=>resolve(new Response(Buffer.concat(chunks),{
+        status:reply.statusCode??500
+      })));
+      reply.on("error",reject);
+    });
+    request.on("error",reject);
+    request.end(body);
   });
 }
-async function completeHttpRead(origin:string,token:string,
+async function prepareHttpRead(origin:string,bearer:string,body:string){
+  return postLoopbackSummary(origin,"prepare",bearer,body);
+}
+async function completeHttpRead(origin:string,bearer:string,
   deviceId:string,projectId:string,requestId:string){
-  return fetch(origin+summaryPath,{
-    method:"POST",headers:headers(token),
-    body:JSON.stringify({deviceId,projectId,requestId})
-  });
+  return postLoopbackSummary(origin,"complete",bearer,
+    JSON.stringify({deviceId,projectId,requestId}));
 }
 async function twoStepHttpRead(origin:string,token:string,
   deviceId:string,projectId:string):Promise<Response>{

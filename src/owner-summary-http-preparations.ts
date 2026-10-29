@@ -11,14 +11,14 @@ import type {PreparedOwnerSummary} from "./connector-ws.js";
  */
 export class OwnerSummaryHttpPreparations{
   private readonly pending=new Map<string,{
-    intent:PreparedOwnerSummary;tokenHash:string;ownerSub:string;clientId:string;
+    intent:PreparedOwnerSummary;credentialDigest:string;ownerSub:string;clientId:string;
     deviceId:string;projectId:string;issuedAtSeconds:number;deadline:number;
   }>();
-  private static digest(token:string){
-    return createHash("sha256").update(token,"utf8").digest("hex");
+  private static digest(credential:string){
+    return createHash("sha256").update(credential,"utf8").digest("hex");
   }
   prepare(
-    token:string,actor:TrustedOAuthReadIdentity,
+    authorizationValue:string,actor:TrustedOAuthReadIdentity,
     deviceId:string,projectId:string,
     create:()=>PreparedOwnerSummary|null
   ):PreparedOwnerSummary|null{
@@ -38,7 +38,7 @@ export class OwnerSummaryHttpPreparations{
        intent.expiresAtUnixMs<=Date.now()||
        intent.expiresAtUnixMs>Date.now()+30_000)return null;
     this.pending.set(intent.requestId,{
-      intent,tokenHash:OwnerSummaryHttpPreparations.digest(token),
+      intent,credentialDigest:OwnerSummaryHttpPreparations.digest(authorizationValue),
       ownerSub:actor.ownerSub,clientId:actor.clientId,deviceId,projectId,
       issuedAtSeconds:actor.accessTokenIssuedAtSeconds,
       deadline:now+Math.min(30_000,Math.max(0,intent.expiresAtUnixMs-Date.now()))
@@ -46,7 +46,7 @@ export class OwnerSummaryHttpPreparations{
     return intent;
   }
   take(
-    requestId:string,token:string,actor:TrustedOAuthReadIdentity,
+    requestId:string,authorizationValue:string,actor:TrustedOAuthReadIdentity,
     deviceId:string,projectId:string
   ):PreparedOwnerSummary|null{
     const entry=this.pending.get(requestId);
@@ -58,7 +58,7 @@ export class OwnerSummaryHttpPreparations{
        entry.ownerSub!==actor.ownerSub||entry.clientId!==actor.clientId||
        entry.issuedAtSeconds!==actor.accessTokenIssuedAtSeconds||
        entry.deviceId!==deviceId||entry.projectId!==projectId||
-       entry.tokenHash!==OwnerSummaryHttpPreparations.digest(token)||
+       entry.credentialDigest!==OwnerSummaryHttpPreparations.digest(authorizationValue)||
        entry.intent.expiresAtUnixMs<=Date.now())return null;
     return entry.intent;
   }
