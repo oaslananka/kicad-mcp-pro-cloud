@@ -129,6 +129,15 @@ test(scenario==="missing-owner-consent" ?
     ws.send(JSON.stringify({kind:"connector.session_proof",version:1,
       signature:Buffer.alloc(64,4).toString("base64url")}));
     assert.equal((await next).kind,"connector.ready");
+    const oauth={
+      ownerSub:owner,clientId:"synthetic-client",
+      accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)
+    };
+    const prepared=relay.prepareOwnerSummary(oauth,device,project);
+    if(scenario==="missing-owner-consent")assert.equal(prepared,null);
+    else assert.ok(prepared,"Each permitted synthetic test must explicitly prepare an intent");
+    assert.equal(await relay.requestSummary(oauth,device,project),null,
+      "Direct legacy read without prepared consent must always fail closed");
 
     if(scenario==="missing-owner-consent"||scenario==="rejected-owner-consent"||
       scenario==="stalled-owner-consent"){
@@ -141,8 +150,7 @@ test(scenario==="missing-owner-consent" ?
           return originalTimeout(handler,delay===8_000?80:delay,...rest);
         }) as typeof setTimeout;
       }
-      const attempt=relay.requestSummary({ownerSub:owner,clientId:"synthetic-client",
-        accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)},device,project);
+      const attempt=relay.requestSummary(oauth,device,project,prepared??undefined);
       globalThis.setTimeout=originalTimeout;
       const result=await Promise.race([
         attempt,
@@ -166,9 +174,7 @@ test(scenario==="missing-owner-consent" ?
           return originalTimeout(handler,delay===8_000?80:delay,...rest);
         }) as typeof setTimeout;
       }
-      const preflight=relay.requestSummary({ownerSub:owner,
-        clientId:"synthetic-client",
-        accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)},device,project);
+      const preflight=relay.requestSummary(oauth,device,project,prepared??undefined);
       // The owner-consent step adds an async boundary. Keep the accelerated
       // test clock installed until DB preflight has actually started and
       // registered its watchdog; otherwise this measures the wrong timer.
@@ -196,8 +202,7 @@ test(scenario==="missing-owner-consent" ?
         return originalTimeout(handler,delay===12_000?80:delay,...rest);
       }) as typeof setTimeout;
     }
-    const pending=relay.requestSummary({ownerSub:owner,clientId:"synthetic-client",
-      accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)},device,project);
+    const pending=relay.requestSummary(oauth,device,project,prepared??undefined);
     const sent=await next;
     globalThis.setTimeout=originalTimeout;
     assert.equal(sent.kind,"connector.authorized_read");

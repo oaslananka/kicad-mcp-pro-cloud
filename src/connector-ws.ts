@@ -389,35 +389,29 @@ export function attachConnectorWebSocket(
     const active=readyDevices.get(socketKey(oauth.ownerSub,deviceId));
     if(!active)return null;
     const {socket,entry}=active;
-    let requestId:string=randomUUID();
-    let ownerExpiresAtUnixMs=Date.now()+30_000;
-    let ownerExpiresAtMonotonic=performance.now()+30_000;
-    if(prepared!==undefined){
-      if(!prepared||typeof prepared!=="object")return null;
-      const reserved=preparedIntents.get(prepared);
-      if(!reserved)return null;
-      // A prepared consent identity can be presented only once, even if
-      // its object was paired with a different OAuth client or device.
-      preparedIntents.delete(prepared);
-      if(reservedSockets.get(reserved.socket)===prepared)
-        reservedSockets.delete(reserved.socket);
-      if(reserved.socket!==socket||
-         reserved.scope!==JSON.stringify([
-           oauth.ownerSub,oauth.clientId,deviceId,projectId
-         ])||
-         prepared.ownerSub!==oauth.ownerSub||
-         prepared.clientId!==oauth.clientId||
-         prepared.deviceId!==deviceId||prepared.projectId!==projectId||
-         prepared.origin!==options.publicOrigin||
-         prepared.operation!=="project_summary"||
-         reserved.deadline<=performance.now()||
-         prepared.expiresAtUnixMs<=Date.now())return null;
-      requestId=prepared.requestId;
-      ownerExpiresAtUnixMs=prepared.expiresAtUnixMs;
-      ownerExpiresAtMonotonic=reserved.deadline;
-    }else if(reservedSockets.has(socket)){
-      return null; // Do not bypass pending explicit approval preparation.
-    }
+    // Never dispatch using the old direct-consent shortcut.
+    if(!prepared||typeof prepared!=="object")return null;
+    const reserved=preparedIntents.get(prepared);
+    if(!reserved)return null;
+    // A prepared consent identity can be presented only once, even if
+    // its object was paired with a different OAuth client or device.
+    preparedIntents.delete(prepared);
+    if(reservedSockets.get(reserved.socket)===prepared)
+      reservedSockets.delete(reserved.socket);
+    if(reserved.socket!==socket||
+       reserved.scope!==JSON.stringify([
+         oauth.ownerSub,oauth.clientId,deviceId,projectId
+       ])||
+       prepared.ownerSub!==oauth.ownerSub||
+       prepared.clientId!==oauth.clientId||
+       prepared.deviceId!==deviceId||prepared.projectId!==projectId||
+       prepared.origin!==options.publicOrigin||
+       prepared.operation!=="project_summary"||
+       reserved.deadline<=performance.now()||
+       prepared.expiresAtUnixMs<=Date.now())return null;
+    const requestId=prepared.requestId;
+    const ownerExpiresAtUnixMs=prepared.expiresAtUnixMs;
+    const ownerExpiresAtMonotonic=reserved.deadline;
     if(entry.phase!=="ready"||entry.readSent||entry.awaiting||
       socket.readyState!==WebSocket.OPEN||
       (entry.sessionDeadline??0)-performance.now()<10_000)return null;

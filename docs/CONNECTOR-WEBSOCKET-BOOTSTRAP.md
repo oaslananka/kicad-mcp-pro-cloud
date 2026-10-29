@@ -599,8 +599,11 @@ client, device, project, origin, `project_summary`, and 30-second expiry.
 It is scoped to the currently authenticated ready socket. Nothing is
 sent to the device at preparation time.
 
-A subsequent `requestSummary(oauth,deviceId,projectId,prepared)` accepts
-only that **same in-memory intent object**, still under the same authenticated
+A subsequent `requestSummary(oauth,deviceId,projectId,prepared)` **requires**
+that exact previously prepared intent. **No prepared argument always means
+denial**, even when no other preparation is pending; the former direct
+consent/dispatch shortcut is removed. The prepared intent must be the
+**same in-memory object**, still under the same authenticated
 socket and exact owner/client/project/device; it burns the preparation on
 attempt. Cloning or modifying its JSON, replaying its reference, swapping
 OAuth clients, disconnecting the device, or calling the legacy direct
@@ -612,7 +615,11 @@ short-lived device read (8-second wire deadline and revocation recheck).
 
 The existing short local read/DB deadlines are unchanged. This separates
 human review preparation from device dispatch, **but is NOT production
-authorization**. It is only a local connector API without a public
+authorization**. The existing HTTP `project-summary` entrypoint does not
+yet construct or provide a prepared intent and therefore fails closed even
+if a synthetic consent port were supplied. Any future HTTP approval flow
+needs a separately authenticated preparation and completion design, not
+a fallback to the old immediate read. It is only a local connector API without a public
 trusted OAuth request-preparation route, deployed owner issuer, real
 physical passkey, or verified operator. The existing issuer still requires
 confirmation inside its 30-second expiry; human usability of that window
