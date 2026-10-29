@@ -5,6 +5,10 @@ on:
   pull_request:
 permissions:
   contents: read
+# Cancel only superseded PR validations; main's trusted deploy signal must never be canceled.
+concurrency:
+  group: cloud-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:
     runs-on: ubuntu-latest

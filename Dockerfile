@@ -1,5 +1,5 @@
 # OCI image contains application code only; never bake Doppler data into layers.
-FROM node:24-bookworm-slim AS build
+FROM node:24-trixie-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
@@ -7,7 +7,7 @@ COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN npm run build && npm prune --omit=dev --ignore-scripts
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:24-trixie-slim AS runtime
 ARG APP_REVISION=unknown
 ENV APP_REVISION=${APP_REVISION}
 ENV NODE_ENV=production
