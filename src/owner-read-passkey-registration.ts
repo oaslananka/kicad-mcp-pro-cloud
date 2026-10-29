@@ -107,6 +107,10 @@ export class PgOwnerReadPasskeyRegistration{
          !timingSafeEqual(row.challenge_digest,hashed)){
         await conn.query("COMMIT");started=false;return "denied";
       }
+      // A malformed WebAuthn attestation must not roll back its already
+      // claimed one-use challenge. Database write failures, however, must
+      // roll back the complete credential insert transaction.
+      let signatureChecked=false;
       try{
         const verified=await verifyRegistrationResponse({
           response,expectedChallenge:challenge,
@@ -114,6 +118,7 @@ export class PgOwnerReadPasskeyRegistration{
           requireUserPresence:true,requireUserVerification:true,
           supportedAlgorithmIDs:[-7]
         });
+        signatureChecked=true;
         if(!verified.verified||!verified.registrationInfo.userVerified){
           await conn.query("COMMIT");started=false;return "denied";
         }
@@ -131,7 +136,12 @@ export class PgOwnerReadPasskeyRegistration{
         await conn.query("COMMIT");started=false;
         return created.rowCount===1?"registered_inactive":"denied";
       }catch{
-        if(started){await conn.query("ROLLBACK");started=false;}
+        if(started){
+          // Invalid signatures may throw inside SimpleWebAuthn. Consume the
+          // claimed challenge even then; only storage failures roll back.
+          await conn.query(signatureChecked?"ROLLBACK":"COMMIT");
+          started=false;
+        }
         return "denied";
       }
     }catch{

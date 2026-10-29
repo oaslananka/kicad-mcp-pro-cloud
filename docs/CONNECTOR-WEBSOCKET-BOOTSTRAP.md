@@ -449,3 +449,20 @@ Neither acceptance test proves enrollment or identity verification of a
 real owner or a physical passkey. A real independent owner-authenticated
 issuer deployment, separate passkey activation ceremony and physical
 KiCad E2E remain blocking; keep PR #64 DRAFT and production connector OFF.
+
+### Failed attestation challenge consumption (RED/GREEN regression)
+
+The browser-generated, correctly challenged ES256 registration proof was
+corrupted at its WebAuthn attestation byte payload. In the earlier draft,
+the verification library threw and the broad SQL rollback restored the
+previously claimed registration challenge. The **same original valid
+registration could then be submitted and accepted**, contrary to the
+documented single-use guarantee.
+
+A PostgreSQL 17 test reproduces that exact RED behavior first, then proves
+the corrected behavior: exceptions during cryptographic verification
+commit the claim (burning the challenge) and the original valid proof
+subsequently receives `denied`; the consumed timestamp persists.
+Persistence/credential-storage errors still roll back their transaction,
+so no partial passkey is inserted. This change is only on PR #64's
+disabled draft path, not in production.

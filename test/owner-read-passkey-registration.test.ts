@@ -121,6 +121,37 @@ test("Chrome registration produces only an inactive passkey under SQL role isola
             "registered_inactive");
           assert.equal(await registrar.complete(owner,requestId,registration),"denied",
             "A registration challenge is one-time");
+          // Regression: a valid challenge plus broken attestation reaches the
+          // signature verifier; it must be burned despite verifier failure.
+          const invalidProofRequest=randomUUID();
+          const invalidProofOptions=await registrar.begin(owner,invalidProofRequest);
+          assert.ok(invalidProofOptions);
+          const invalidProofRegistration=await page.evaluate(`(async()=>{
+            const options=${JSON.stringify(invalidProofOptions)};
+            const decode=(value)=>Uint8Array.from(atob(
+              value.replace(/-/g,"+").replace(/_/g,"/")+
+              "=".repeat((4-value.length%4)%4)),c=>c.charCodeAt(0));
+            const credential=await navigator.credentials.create({publicKey:{
+              ...options,challenge:decode(options.challenge),
+              user:{...options.user,id:decode(options.user.id)},
+              excludeCredentials:[]
+            }});
+            if(!credential||typeof credential.toJSON!=="function")
+              throw Error("Cannot create registration for replay regression");
+            return credential.toJSON();
+          })()`) as RegistrationResponseJSON;
+          const invalidAttestation={
+            ...invalidProofRegistration,
+            response:{...invalidProofRegistration.response,attestationObject:"AA"}
+          };
+          assert.equal(await registrar.complete(owner,invalidProofRequest,invalidAttestation),
+            "denied","Malformed attestation must fail verification");
+          assert.equal(await registrar.complete(owner,invalidProofRequest,invalidProofRegistration),
+            "denied","Failed attestation must permanently burn the matching challenge");
+          const persisted=await admin.query<{used_at:Date|null}>(
+            "SELECT used_at FROM owner_read_passkey_registrations "+
+            "WHERE request_id=$1",[invalidProofRequest]);
+          assert.ok(persisted.rows[0]?.used_at,"Failed cryptography must commit consumed state");
           const tamperedRequest=randomUUID();
           assert.ok(await registrar.begin(owner,tamperedRequest));
           const wrongOwner=await registrar.complete("another-owner",
