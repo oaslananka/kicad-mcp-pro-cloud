@@ -32,8 +32,8 @@ while [[ "$1" != -- ]]; do [[ $# -gt 0 ]] || exit 11; shift; done
 shift
 exec env OFFSITE_REMOTE_SSH="\${FIXTURE_REMOTE_SSH:-}" OFFSITE_REMOTE_DIR="\${FIXTURE_REMOTE_DIR:-}" KICAD_BACKUP_AGE_IDENTITY="\${FIXTURE_AGE_IDENTITY:-}" KICAD_BACKUP_AGE_RECIPIENT="\${FIXTURE_AGE_RECIPIENT:-}" "$@"
 `,
-    systemctl:`#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "$HOME/systemctl.log"
+    systemctl:String.raw`#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$HOME/systemctl.log"
 `
   };
   for(const [name,content] of Object.entries(mocks)){
@@ -47,7 +47,7 @@ printf '%s\\n' "$*" >> "$HOME/systemctl.log"
     FIXTURE_REMOTE_SSH:"backup@127.0.0.1",
     FIXTURE_REMOTE_DIR:"/private/kicad/offsite"
   };
-  return {root,repo,home,env,run:(patch={})=>spawnSync("bash",[join(repo,"scripts/install-offsite-backup-timer.sh")],{env:{...env,...patch},encoding:"utf8",timeout:10000})};
+  return {root,repo,home,env,run:(patch={})=>spawnSync("/usr/bin/bash",[join(repo,"scripts/install-offsite-backup-timer.sh")],{env:{...env,...patch},encoding:"utf8",timeout:10000})};
 }
 
 test("Doppler-only timer preflight rejects missing/invalid destination without touching systemd",()=>{
@@ -96,7 +96,7 @@ test("source and independent restore accept 13 and reject mismatched versioned m
     ["12","12",true],["13","13",true],["14","13",false],["0","0",false],["1000","1000",false]
   ]){
     const ledger=count+":"+"a".repeat(32);
-    const result=spawnSync("bash",["-c",`version="$1"; ledger="$2"; ${regexLine}`,"fixture",version,ledger],{encoding:"utf8"});
+    const result=spawnSync("/usr/bin/bash",["-c",`version="$1"; ledger="$2"; ${regexLine}`,"fixture",version,ledger],{encoding:"utf8"});
     assert.equal(result.status===0,pass,version+"/"+count);
   }
   const dir=mkdtempSync(join(tmpdir(),"cloud-offsite-archive-"));
@@ -106,10 +106,10 @@ test("source and independent restore accept 13 and reject mismatched versioned m
     chmodSync(file,0o600);
     const sha=createHash("sha256").update(readFileSync(file)).digest("hex");
     const env={...process.env,EXPECTED_SHA256:sha,EXPECTED_LEDGER:"13:"+"a".repeat(32)};
-    const valid=spawnSync("bash",[restore,file],{env:{...env,EXPECTED_SCHEMA_VERSION:"13",KICAD_BACKUP_AGE_IDENTITY:"",KICAD_BACKUP_AGE_RECIPIENT:""},encoding:"utf8"});
+    const valid=spawnSync("/usr/bin/bash",[restore,file],{env:{...env,EXPECTED_SCHEMA_VERSION:"13",KICAD_BACKUP_AGE_IDENTITY:"",KICAD_BACKUP_AGE_RECIPIENT:""},encoding:"utf8"});
     assert.equal(valid.status,2);
     assert.match(valid.stderr,/Independent operator must provide authorized age identity/);
-    const invalid=spawnSync("bash",[restore,file],{env:{...env,EXPECTED_SCHEMA_VERSION:"14"},encoding:"utf8"});
+    const invalid=spawnSync("/usr/bin/bash",[restore,file],{env:{...env,EXPECTED_SCHEMA_VERSION:"14"},encoding:"utf8"});
     assert.equal(invalid.status,2);
     assert.match(invalid.stderr,/checksum receipt\/count must match schema version/);
   }finally{rmSync(dir,{recursive:true,force:true});}
