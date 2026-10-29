@@ -16,7 +16,8 @@ export const migrationFiles = [
   "011_pairing_review_budget.pgsql",
   "012_pairing_device_budget.pgsql",
   "013_owner_read_approvals.pgsql",
-  "014_owner_read_approval_replay_guard.pgsql"
+  "014_owner_read_approval_replay_guard.pgsql",
+  "015_owner_read_webauthn_issuer.pgsql"
 ] as const;
 
 type Migration = {version:number;file:string;sql:string;checksum:string};

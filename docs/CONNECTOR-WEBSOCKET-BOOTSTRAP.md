@@ -299,3 +299,39 @@ The WebSocket upgrade now also requires a verified ingress TCP peer and
 single `CF-Connecting-IP` header; both use the same fail-closed source
 resolver as device enrollment. See
 [trusted ingress source](TRUSTED-INGRESS-SOURCE.md).
+
+## Standalone WebAuthn owner approval issuer — library core only, not deployed
+
+Draft-only `src/owner-read-webauthn-issuer.ts` and migration
+`015_owner_read_webauthn_issuer.pgsql` implement the **server-side**
+signature-verification and restricted-receipt-issuance primitive using
+`@simplewebauthn/server`. The issuer requires an already registered,
+explicitly enabled owner passkey, a fresh cryptographic challenge, the exact
+HTTPS origin/RP ID, a verified signature, and **user verification required**
+(verified UV bit; PIN/biometric passkey verification). A request can only
+issue one `project_summary` receipt bound to its persisted owner, OAuth
+client, local device, project, origin, request UUID and <=30-second expiry.
+An attempted assertion is consumed atomically before cryptographic checking,
+including when the signature, origin, RP ID, counter, UV bit or credential is
+invalid. A revoked passkey or old positive signature counter cannot issue a
+new approval. The issuer uses only an INSERT-scoped approval-writer login,
+and the earlier consumer rejects that identity.
+
+The test `test/owner-read-webauthn-issuer.test.ts` exercises actual P-256
+WebAuthn signatures, a separate PostgreSQL issuer role, and denial of
+missing UV, invalid origin/RP ID, forged signatures, counter replay, a
+reused/failed challenge, revoked passkeys and mismatched owners. Test keys,
+passkey credentials and PostgreSQL logins are entirely synthetic.
+
+**This is not a finished human approval product.** There is deliberately
+NO HTTP issuer, no browser passkey enrollment or registration workflow, no
+authenticated owner session for the issuer, no user-visible display of the
+exact read scope, no independently deployed issuer, no issued production
+passkey, no provisioned writer/consumer SQL accounts, and no Cloud
+`ownerConsent` runtime wiring. The current socket's eight-second consent
+budget is insufficient to assume reliable interactive passkey verification;
+a future end-to-end design must explicitly reconcile the pending read,
+user-presence UX, request/session deadlines and authentication trust
+boundary, then test real hardware. A normal OAuth login does NOT establish
+passkey UV for each request. Merely merging this code or changing a feature
+flag must never authorize a device read.
