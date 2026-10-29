@@ -525,3 +525,28 @@ by independent ingress/CSRF/rate controls and accepted using a physically
 enrolled real passkey. No activation HTTP handler, owner login verifier,
 production SQL role, passkey enrollment, credential, or feature flag
 is deployed. PR #64 remains DRAFT and Cloud connector OFF.
+
+### Full synthetic passkey ceremony acceptance (separate DB principals)
+
+`test/owner-read-complete-ceremony.test.ts` is a single local,
+**not-production**, cross-component acceptance scenario. An isolated HTTPS
+browser with a Chrome virtual authenticator creates an actual P-256/WebAuthn
+credential, registers it as inactive, proves that inactive enrollment cannot
+issue a consent receipt, activates it with a new user-verified signature,
+signs a separate owner-read challenge, inserts exactly one metadata-only
+`project_summary` receipt and consumes that scope exactly once. This
+scenario checks wrong OAuth client, wrong project, activation challenge
+replay, issuance challenge replay, receipt replay, and role separation.
+It uses **four distinct PostgreSQL NOLOGIN roles** with precisely granted
+registration, activation, issuer, and read-consumer privileges. Role
+switches occur only in isolated test database sessions; no test role
+credentials are stored or applied to a live database.
+
+This is a **synthetic integrated ceremony**, not an actual human owner
+login or a deployed issuer. The test supplies the trusted owner identity
+and scope itself, so it does NOT establish that a real OAuth client,
+real physical owner, local operator boundary or WebSocket request
+created that scope. The production Cloud router does not mount any of
+these standalone classes. PR #64 MUST remain DRAFT and the connector
+MUST remain OFF pending actual independently authenticated owner
+session, real passkey and physical KiCad end-to-end acceptance.
