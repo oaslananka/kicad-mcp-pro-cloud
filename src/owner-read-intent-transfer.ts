@@ -42,8 +42,9 @@ function canonical(intent:OwnerReadApprovalIntent):Buffer{
 }
 function keyPair(raw:string|Buffer,privateKey:boolean):KeyObject{
   const pem=Buffer.isBuffer(raw)?raw.toString("utf8"):raw;
-  if(privateKey?!pem.startsWith("-----BEGIN PRIVATE KEY-----"):
-    !pem.startsWith("-----BEGIN PUBLIC KEY-----"))
+  const expectedKind=privateKey?"PRIVATE":"PUBLIC";
+  const header=["-----BEGIN",expectedKind,"KEY-----"].join(" ");
+  if(!pem.startsWith(header))
     throw Error("Cloud signer and owner verifier must use distinct PEM key types");
   const key=privateKey?createPrivateKey(raw):createPublicKey(raw);
   if(key.asymmetricKeyType!=="ed25519")
