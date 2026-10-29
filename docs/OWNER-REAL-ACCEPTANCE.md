@@ -260,3 +260,39 @@ runtime composition. This is synthetic HTTPS/cryptographic contract
 acceptance only, **not** real GitHub OAuth login, human owner verification,
 physical WebAuthn, independently deployed authority or local KiCad WSS
 acceptance. Do not merge or enable remote reads.
+
+### Real owner HTTPS host integration (opt-in, draft only)
+
+The independent `createOwnerAcceptanceServer` now accepts an **optional
+`approval` composition dependency** containing the separately verified
+Cloud signed-intent intake and the session-protected review handler. When
+provided by trusted server code, the *same exact-origin HTTPS server* routes
+`POST /internal/owner-read/intent`, `GET /owner-read/review?requestId=...`,
+the static review script, and `POST /owner-read/approval`. Its health reply
+identifies `approval=webauthn_review_issuer`. Without this dependency, the
+routes do not exist and its health reply remains `approval=disabled`.
+
+**Importantly, the actual `owner:acceptance` executable does not supply
+this dependency.** Its default, passive-only registration policy has not
+been changed; it still rejects internal intent creation, review, approval,
+passkey activation and connector operation. Production Cloud also never
+mounts this issuer. The optional dependency is not a configuration toggle
+that bypasses authentication or approves a read.
+
+The isolated `owner-read-review-http.test.ts` now starts the **actual
+owner acceptance HTTPS server**, a real Better Auth session stored in
+PostgreSQL, a separate restricted SQL issuer login, the Cloud Ed25519 signer
+and independently pinned public-key verifier. The complete synthetic
+sequence accepts one exact Cloud-signed request, verifies the real
+session/CSRF and P-256 WebAuthn UV assertion, and produces precisely
+one SQL receipt for its immutable owner/client/device/project/origin scope.
+It also denies an independently valid *different user's* Better Auth
+session, revoked owner session, unsigned scope, wrong Origin/CSRF,
+tampered signature and replay. None of the synthetic data represents
+independent physical owner acceptance.
+
+The remaining production boundary is explicit: securely provision an
+independent owner deployment, an issuer-only SQL role and the pinned Cloud
+verification key, then obtain real owner GitHub OAuth and physical passkey
+approval. The existing passive acceptance CLI must not be enabled as
+an approval issuer by inventing test credentials or switching flags.

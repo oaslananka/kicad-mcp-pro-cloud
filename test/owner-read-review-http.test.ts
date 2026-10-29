@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import {createHash,generateKeyPairSync,randomBytes,randomUUID,sign} from "node:crypto";
+import {createHash,createHmac,generateKeyPairSync,randomBytes,randomUUID,sign} from "node:crypto";
 import {execFileSync} from "node:child_process";
 import {mkdtemp,readFile,rm} from "node:fs/promises";
-import {createServer,request as httpsRequest,type Server} from "node:https";
+import {request as httpsRequest,type Server} from "node:https";
+import {createServer as createTcpServer} from "node:net";
 import type {AddressInfo} from "node:net";
 import {tmpdir} from "node:os";
 import path from "node:path";
@@ -14,6 +15,12 @@ import {PgOwnerReadWebAuthnIssuer,type OwnerReadApprovalIntent}
   from "../src/owner-read-webauthn-issuer.js";
 import {createOwnerReadReviewHandler}
   from "../src/owner-read-review-http.js";
+import {createOwnerAcceptanceServer} from "../src/owner-acceptance-server.js";
+import {createIdentity} from "../src/identity.js";
+import {createIndependentOwnerSessionVerifier}
+  from "../src/owner-read-better-auth-session.js";
+import {createSignedOwnerIntentDelivery,createVerifiedOwnerIntentIntake}
+  from "../src/owner-read-intent-transfer.js";
 
 const source=process.env.TEST_DATABASE_URL;
 const owner="owner-reviewed-fixture";
@@ -82,7 +89,7 @@ function call(
 test("independent HTTPS owner review accepts only explicit verified WebAuthn scope",
   {skip:!source,timeout:70_000},async()=>{
     await inIsolatedDatabase(source!,[
-      "013_owner_read_approvals.pgsql","014_owner_read_approval_replay_guard.pgsql",
+      "003_better_auth.pgsql","013_owner_read_approvals.pgsql","014_owner_read_approval_replay_guard.pgsql",
       "015_owner_read_webauthn_issuer.pgsql",
       "017_owner_read_webauthn_challenge_one_use.pgsql"
     ],async db=>{
@@ -122,48 +129,114 @@ test("independent HTTPS owner review accepts only explicit verified WebAuthn sco
           "-sha256","-nodes","-days","1","-keyout",privateKey,"-out",cert,
           "-subj","/CN=localhost",
           "-addext","subjectAltName=DNS:localhost"],{stdio:"ignore"});
-        let handle:ReturnType<typeof createOwnerReadReviewHandler>|undefined;
-        server=createServer({
-          key:await readFile(privateKey),cert:await readFile(cert)
-        },(req,res)=>{
-          void (handle?.handle(req,res)??Promise.reject(
-            Error("Test listener not initialized"))).catch(()=>{
-            if(!res.headersSent)res.writeHead(403);res.end();
-          });
-        });
-        await new Promise<void>(r=>server!.listen(0,"127.0.0.1",r));
-        const info=server.address() as AddressInfo;
+        const reservation=createTcpServer();
+        await new Promise<void>(r=>reservation.listen(0,"::",r));
+        const info=reservation.address() as AddressInfo;
         const origin="https://localhost:"+info.port;
-        const csrf=randomBytes(32).toString("base64url");
-        let authenticated=owner;
-        const authenticate=async (request:{headers:{cookie?:string}})=>{
-          if(request.headers.cookie!=="fixture-session")return null;
-          return {ownerSub:authenticated,csrf};
-        };
-        handle=createOwnerReadReviewHandler(
+        await new Promise<void>(r=>reservation.close(()=>r()));
+        const authSecret=randomBytes(48).toString("hex");
+        const csrfKey=randomBytes(48);
+        const sessionId=randomUUID();
+        const token=randomBytes(32).toString("base64url");
+        await db.query('INSERT INTO "users"("id","name","email","emailVerified")'+
+          ' VALUES($1,$2,$3,true)',[
+            owner,"Review owner","owner-review@test.invalid"
+          ]);
+        await db.query('INSERT INTO "session"'+
+          '("id","expiresAt","token","updatedAt","userId")'+
+          ' VALUES($1,$2,$3,$4,$5)',[
+            sessionId,new Date(Date.now()+20*60_000),token,new Date(),owner
+          ]);
+        const otherId=randomUUID(),otherToken=randomBytes(32).toString("base64url");
+        await db.query('INSERT INTO "users"("id","name","email","emailVerified")'+
+          ' VALUES($1,$2,$3,true)',[
+            "untrusted-other-owner","Other user","other-owner@test.invalid"
+          ]);
+        await db.query('INSERT INTO "session"'+
+          '("id","expiresAt","token","updatedAt","userId")'+
+          ' VALUES($1,$2,$3,$4,$5)',[
+            otherId,new Date(Date.now()+20*60_000),otherToken,
+            new Date(),"untrusted-other-owner"
+          ]);
+        const otherCookie="__Secure-better-auth.session_token="+
+          encodeURIComponent(otherToken+"."+
+            createHmac("sha256",authSecret).update(otherToken).digest("base64"));
+        const identity=createIdentity({
+          publicOrigin:origin,audience:origin+"/mcp",databaseUrl:source!
+        },{
+          secret:authSecret,googleId:"",googleSecret:"",
+          githubId:"synthetic-review-provider",
+          githubSecret:"synthetic-review-secret"
+        },db);
+        const authenticate=createIndependentOwnerSessionVerifier(
+          identity,origin,owner,csrfKey
+        );
+        const cookie="__Secure-better-auth.session_token="+encodeURIComponent(
+          token+"."+createHmac("sha256",authSecret).update(token).digest("base64")
+        );
+        const csrf=createHmac("sha256",csrfKey).update(JSON.stringify([
+          "owner-passkey-registration-session-v1",origin,owner,sessionId,token
+        ])).digest("base64url");
+        const handle=createOwnerReadReviewHandler(
           new PgOwnerReadWebAuthnIssuer(issuerDb,origin),origin,
           authenticate,await readFile(new URL("../src/owner-read-review-client.js",
             import.meta.url))
         );
+        const registration={
+          begin:async()=>null,complete:async()=>null
+        } as unknown as Parameters<typeof createOwnerAcceptanceServer>[0]["registration"];
+        const keys=generateKeyPairSync("ed25519");
+        const sender=keys.privateKey.export({type:"pkcs8",format:"pem"}).toString();
+        const pinned=keys.publicKey.export({type:"spki",format:"pem"}).toString();
+        const intake=createVerifiedOwnerIntentIntake(
+          origin,cloudOrigin,pinned,async subject=>
+            subject===owner?key.id:null,handle
+        );
+        server=createOwnerAcceptanceServer({
+          authorityOrigin:origin,identity,sessionVerifier:authenticate,
+          registration,
+          tls:{key:await readFile(privateKey),cert:await readFile(cert)},
+          clientScript:Buffer.from("/* enrollment fixture */".padEnd(150," ")),
+          approval:{receiveSignedIntent:intake,review:handle.handle}
+        });
+        await new Promise<void>(r=>server!.listen(info.port,"::",r));
         const ca=await readFile(cert);
         const intent=():OwnerReadApprovalIntent=>({
           requestId:randomUUID(),ownerSub:owner,clientId:"trusted-client",
           deviceId:randomUUID(),projectId:randomUUID(),
           origin:cloudOrigin,expiresAtUnixMs:Date.now()+24_000
         });
+        const deliver=createSignedOwnerIntentDelivery(
+          origin,cloudOrigin,sender,ca);
         const target=intent();
-        assert.equal(handle.addTrustedIntent(target,key.id),true);
-        assert.equal(handle.addTrustedIntent(target,key.id),false);
+        assert.equal(await deliver({...target,operation:"project_summary"}),
+          origin+"/owner-read/review?requestId="+target.requestId);
+        assert.equal(await deliver({...target,operation:"project_summary"}),null,
+          "Signed intent is single-use");
+        const health=await call(info.port,ca,"/health");
+        assert.equal(health.status,200);
+        assert.deepEqual(JSON.parse(health.body),{
+          status:"acceptance_only",registration:"inactive_only",
+          activation:"disabled",approval:"webauthn_review_issuer",connector:"disabled"
+        });
+        assert.equal((await call(info.port,ca,"/api/auth/oauth2/token")).status,404);
+        assert.equal((await call(info.port,ca,"/api/v1/connector/ws")).status,404);
+        assert.equal((await call(info.port,ca,"/internal/owner-read/intent",{
+          body:{requestId:randomUUID(),ownerSub:owner,clientId:"forged"}
+        })).status,403);
         assert.equal((await call(info.port,ca,
           "/owner-read/review?requestId="+target.requestId)).status,403);
-        authenticated="attacker";
         assert.equal((await call(info.port,ca,
           "/owner-read/review?requestId="+target.requestId,
-          {cookie:"fixture-session"})).status,404);
-        authenticated=owner;
+          {cookie:otherCookie})).status,403,
+          "Valid session of a different owner cannot review this scope");
+        assert.equal((await call(info.port,ca,
+          "/owner-read/review?requestId="+target.requestId,
+          {cookie:"forged-session"})).status,403,
+          "Unsigned session cannot browse another owner's scope");
         const reviewed=await call(info.port,ca,
           "/owner-read/review?requestId="+target.requestId,
-          {cookie:"fixture-session"});
+          {cookie});
         assert.equal(reviewed.status,200);
         assert.match(reviewed.body,/Approve one project summary/);
         const embedded=reviewed.body.match(
@@ -178,19 +251,19 @@ test("independent HTTPS owner review accepts only explicit verified WebAuthn sco
           "SELECT count(*)::int AS n FROM owner_read_approvals")).rows[0].n,0,
         "A page view or challenge must not authorize a read");
         assert.equal((await call(info.port,ca,"/owner-read/approval",{
-          cookie:"fixture-session",origin:"https://attacker.example.test",
+          cookie,origin:"https://attacker.example.test",
           body:{requestId:target.requestId,csrf,challenge:data.challenge,
             assertion:validAssertion(key,data.challenge,origin,1)}
         })).status,403,"Cross-site POST never approves");
         assert.equal((await call(info.port,ca,"/owner-read/approval",{
-          cookie:"fixture-session",body:{
+          cookie,body:{
             requestId:target.requestId,csrf:"invalid",challenge:data.challenge,
             assertion:validAssertion(key,data.challenge,origin,1)}
         })).status,403);
         assert.equal((await db.query(
           "SELECT count(*)::int AS n FROM owner_read_approvals")).rows[0].n,0);
         assert.equal((await call(info.port,ca,"/owner-read/approval",{
-          cookie:"fixture-session",body:{requestId:target.requestId,csrf,
+          cookie,body:{requestId:target.requestId,csrf,
             challenge:data.challenge,
             assertion:validAssertion(key,data.challenge,origin,1)}
         })).status,204,"User-verified independent passkey yields exact one-shot receipt");
@@ -207,25 +280,25 @@ test("independent HTTPS owner review accepts only explicit verified WebAuthn sco
           operation:"project_summary",consumed_at:null
         });
         assert.equal((await call(info.port,ca,"/owner-read/approval",{
-          cookie:"fixture-session",body:{requestId:target.requestId,csrf,
+          cookie,body:{requestId:target.requestId,csrf,
             challenge:data.challenge,
             assertion:validAssertion(key,data.challenge,origin,2)}
         })).status,403,"Used approval cannot be replayed");
         assert.equal((await call(info.port,ca,
           "/owner-read/review?requestId="+target.requestId,
-          {cookie:"fixture-session"})).status,404);
+          {cookie})).status,404);
         // Browser may not supply a new owner intent from its body or URL.
         const forged=intent();
         assert.equal((await call(info.port,ca,
           "/owner-read/review?requestId="+forged.requestId,
-          {cookie:"fixture-session"})).status,404);
+          {cookie})).status,404);
         // An invalid passkey signature must never create a receipt, and
         // the same request must not be retryable with a corrected proof.
         const rejected=intent();
-        assert.equal(handle.addTrustedIntent(rejected,key.id),true);
+        assert.ok(await deliver({...rejected,operation:"project_summary"}));
         const rejectedPage=await call(info.port,ca,
           "/owner-read/review?requestId="+rejected.requestId,
-          {cookie:"fixture-session"});
+          {cookie});
         assert.equal(rejectedPage.status,200);
         const rejectedData=rejectedPage.body.match(
           /<script id="request-data" type="application\/json">([^<]+)<\/script>/);
@@ -236,17 +309,27 @@ test("independent HTTPS owner review accepts only explicit verified WebAuthn sco
         const signed=validAssertion(key,rejectedChallenge,origin,2);
         signed.response.signature=randomBytes(70).toString("base64url");
         assert.equal((await call(info.port,ca,"/owner-read/approval",{
-          cookie:"fixture-session",body:{requestId:rejected.requestId,csrf,
+          cookie,body:{requestId:rejected.requestId,csrf,
             challenge:rejectedChallenge,assertion:signed}
         })).status,403);
         assert.equal((await call(info.port,ca,"/owner-read/approval",{
-          cookie:"fixture-session",body:{requestId:rejected.requestId,csrf,
+          cookie,body:{requestId:rejected.requestId,csrf,
             challenge:rejectedChallenge,
             assertion:validAssertion(key,rejectedChallenge,origin,2)}
         })).status,403,"A failed WebAuthn signature burns the approval attempt");
         assert.equal((await db.query(
           "SELECT count(*)::int AS n FROM owner_read_approvals")).rows[0].n,1,
           "Only the deliberate verified action ever produced one receipt");
+        const afterRevocation=intent();
+        assert.ok(await deliver({...afterRevocation,operation:"project_summary"}));
+        await db.query('DELETE FROM "session" WHERE "id"=$1',[sessionId]);
+        assert.equal((await call(info.port,ca,
+          "/owner-read/review?requestId="+afterRevocation.requestId,
+          {cookie})).status,403,
+          "A revoked real Better Auth session cannot begin another review");
+        assert.equal((await db.query(
+          "SELECT count(*)::int AS n FROM owner_read_approvals")).rows[0].n,1,
+          "A signed scope cannot override a revoked human session");
       }finally{
         if(server)await new Promise<void>(r=>server!.close(()=>r()));
         await issuerDb?.end();

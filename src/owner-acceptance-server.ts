@@ -22,6 +22,14 @@ export function createOwnerAcceptanceServer(options:{
   registration:PgOwnerReadPasskeyRegistration;
   tls:Pick<ServerOptions,"key"|"cert">;
   clientScript:Buffer;
+  /** Optional independent review role; NEVER supplied by owner:acceptance CLI.
+   * The caller must first verify a dedicated issuer SQL role and Cloud
+   * signature public key. Without both callbacks all routes stay absent.
+   */
+  approval?:Readonly<{
+    receiveSignedIntent:(req:IncomingMessage,res:ServerResponse)=>Promise<void>;
+    review:(req:IncomingMessage,res:ServerResponse)=>Promise<void>;
+  }>;
 }){
   const authority=new URL(options.authorityOrigin);
   if(authority.protocol!=="https:"||
@@ -69,8 +77,24 @@ export function createOwnerAcceptanceServer(options:{
     }
     if(req.method==="GET"&&url==="/health"){
       send(res,200,{status:"acceptance_only",registration:"inactive_only",
-        activation:"disabled",approval:"disabled",connector:"disabled"});
+        activation:"disabled",
+        approval:options.approval?"webauthn_review_issuer":"disabled",connector:"disabled"});
       return;
+    }
+    // Scope issuance is *not* an OAuth-client endpoint. The intake checks
+    // Cloud's pinned Ed25519 public key and a one-use signed request before
+    // it can register a review intent for an independently signed-in owner.
+    if(options.approval&&req.method==="POST"&&
+       url==="/internal/owner-read/intent"){
+      await options.approval.receiveSignedIntent(req,res);return;
+    }
+    if(options.approval&&(
+       (req.method==="GET"&&(
+         url==="/owner-read/review.js"||
+         url.startsWith("/owner-read/review?")))||
+       (req.method==="POST"&&url==="/owner-read/approval")
+    )){
+      await options.approval.review(req,res);return;
     }
     if(req.method==="GET"&&url==="/owner-passkey/register/client.js"){
       res.writeHead(200,{"Content-Type":"text/javascript; charset=utf-8",

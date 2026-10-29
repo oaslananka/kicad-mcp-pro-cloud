@@ -748,3 +748,21 @@ No signing key is created or persisted in this repository. Production key
 provisioning, trusted Cloud source identity, independent owner DNS/OAuth app,
 passkey activation, real operator and hardware KiCad E2E still require
 separate acceptance. The release remains **NO-GO**.
+
+### Optional owner HTTPS host composition is not live activation
+
+The standalone `createOwnerAcceptanceServer` can now be constructed with
+an explicitly provided `approval` dependency, whose two components are
+the pinned-signature Cloud intake and the independently session-gated
+review handler. This enables end-to-end *synthetic* HTTPS acceptance tests
+without crafting a weaker test-only server. The default `owner:acceptance`
+CLI and Cloud `main.ts` do not provide it. The default owner host continues
+to return `approval=disabled` and HTTP 404 for internal intent and review
+routes; no uncontrolled feature flag makes them public.
+
+The actual-host integration also proves that a valid Better Auth session
+owned by another person and a revoked original owner session cannot use
+the signed request. Cloud's Ed25519 signature only authenticates the
+request scope, **not the human**, and cannot mint a receipt by itself.
+Issuer-only PostgreSQL rights and UV-verified WebAuthn remain mandatory.
+No production release or deployment is permitted from this draft.

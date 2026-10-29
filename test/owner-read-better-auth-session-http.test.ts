@@ -159,6 +159,15 @@ test("real Better Auth session gates standalone HTTPS owner page and registratio
         assert.equal((await invoke("/auth/start/github","GET")).status,303,
           "Direct GET must not start OAuth");
 
+        assert.equal((await invoke("/owner-read/review.js","GET")).status,404,
+          "Existing passive-only owner host must not serve review code");
+        assert.equal((await invoke(
+          "/owner-read/review?requestId="+randomUUID(),"GET",cookie)).status,404,
+          "Passive-only owner host has no approval review route");
+        assert.equal((await invoke("/internal/owner-read/intent","POST",
+          undefined,{requestId:randomUUID()})).status,404,
+          "Unsigned approval scope is not an entry point on the default host");
+        assert.equal((await invoke("/owner-passkey/activate","GET")).status,404);
         assert.equal((await invoke("/api/auth/oauth2/token","GET")).status,404,
           "Owner acceptance service must not offer MCP token issuance");
         assert.equal((await invoke("/api/v1/connector/ws","GET")).status,404,
