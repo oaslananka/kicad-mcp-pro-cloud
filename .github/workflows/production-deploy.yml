@@ -36,14 +36,14 @@ jobs:
           else
             echo 'superseded=false' >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.version.outputs.superseded == 'false'
         with:
           persist-credentials: false
       - name: Verify checked-out trusted main revision
         if: steps.version.outputs.superseded == 'false'
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_REVISION"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.version.outputs.superseded == 'false'
         with:
           node-version: '24'
