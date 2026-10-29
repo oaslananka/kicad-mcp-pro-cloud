@@ -5,7 +5,10 @@ import {lockActiveDeviceKey,withDeviceTransaction} from "./device-db-transaction
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_BYTES=8192;
-const READ_OPERATIONS:readonly ReadOperation[]=["project_summary","run_drc","run_erc"];
+// This Cloud release authorizes exactly one metadata-only summary.
+// DRC/ERC remain protocol vocabulary for future separately approved operations,
+// but may never pass this connector read boundary.
+const READ_OPERATIONS:readonly ReadOperation[]=["project_summary"];
 type SessionRow={expires_at:Date;state:string;last_sequence:string;connection_digest:string};
 type GrantRow={project_enabled:boolean;grant_enabled:boolean;project_mode:string;grant_mode:string};
 type CutoffRow={revoked_at:Date};

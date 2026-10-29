@@ -49,7 +49,7 @@ test("signed readonly envelopes require current owner, client, session and proje
       ownerSub:owner,clientId:client,
       accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)-30
     };
-    const packet=(id:string,operation="run_drc",extra:object={})=>Buffer.from(
+    const packet=(id:string,operation="project_summary",extra:object={})=>Buffer.from(
       JSON.stringify({kind:"connector.read_request",version:1,requestId:randomUUID(),
         deviceId:device,projectId:id,operation,deadlineUnixMs:Date.now()+27_000,...extra}),"utf8");
     function attempt(sequence:number,raw:Buffer,identity=oauth,conn=connection,
@@ -69,6 +69,10 @@ test("signed readonly envelopes require current owner, client, session and proje
     assert.equal((await attempt(1,packet(project),{...oauth,clientId:"other-client"}).run).kind,"unavailable");
     assert.equal((await attempt(1,packet(otherProject)).run).kind,"unavailable");
     assert.equal((await attempt(1,packet(project,"shell.execute")).run).kind,"unavailable");
+    // A valid signature plus owner/client/device/project grant is never
+    // permission to execute DRC or ERC on the local KiCad engine.
+    assert.equal((await attempt(1,packet(project,"run_drc")).run).kind,"unavailable");
+    assert.equal((await attempt(1,packet(project,"run_erc")).run).kind,"unavailable");
     assert.equal((await attempt(1,packet(project,"run_drc",{localPath:"/tmp/design.kicad_pcb"})).run).kind,"unavailable");
     assert.equal((await attempt(1,packet(project,"run_drc",{deviceId:randomUUID()})).run).kind,"unavailable");
     assert.equal((await attempt(1,packet(project,"run_drc",{deadlineUnixMs:Date.now()+90_000})).run).kind,"unavailable");
@@ -102,7 +106,10 @@ test("signed readonly envelopes require current owner, client, session and proje
     await db.query("UPDATE projects SET enabled=false WHERE id=$1",[project]);
     assert.equal((await attempt(3,packet(project),fresh).run).kind,"unavailable");
     await db.query("UPDATE projects SET enabled=true WHERE id=$1",[project]);
-    assert.equal((await attempt(3,packet(project,"run_erc"),fresh).run).kind,"accepted");
+    // Re-enabling the project does not broaden the operation whitelist.
+    assert.equal((await attempt(3,packet(project,"run_drc"),fresh).run).kind,"unavailable");
+    assert.equal((await attempt(3,packet(project,"run_erc"),fresh).run).kind,"unavailable");
+    assert.equal((await attempt(3,packet(project,"project_summary"),fresh).run).kind,"accepted");
 
     // Old sequence cannot become valid after a client or project re-grant.
     assert.equal((await attempt(2,packet(project),fresh).run).kind,"unavailable");

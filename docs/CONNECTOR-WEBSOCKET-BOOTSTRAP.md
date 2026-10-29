@@ -63,6 +63,12 @@ database-backed per-device issuance budget across all app replicas.
 
 The optional server-to-device `project_summary` relay issues a single
 `connector.authorized_read` with a short, absolute signed request deadline.
+The database-backed signed-read admission gate also accepts only project_summary.
+It rejects signed run_drc and run_erc requests even after the owner, OAuth
+client, session, device and project grant are valid. These operations remain
+generic protocol vocabulary, not Cloud authorization for this connector release.
+Invalid operations do not advance the one-shot sequence; a legitimate summary
+can still be accepted.
 When the local device replies, the Cloud transport checks the exact
 request/project identity and deadline, then asynchronously revalidates the
 owner/OAuth-client project grant and active device binding in PostgreSQL.
