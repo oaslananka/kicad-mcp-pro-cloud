@@ -177,3 +177,24 @@ covered by the browser registration tests**, not this process-launch smoke
 test. Consequently this still does not demonstrate a human's passkey,
 OAuth provider callback, or a physical KiCad WSS read. Real-owner NO-GO
 conditions remain unchanged.
+
+### Compiled HTTPS host with Chrome WebAuthn enrollment (virtual device)
+
+The **same actual compiled** `dist/owner-acceptance-cli.js` integration
+test now exercises the complete browser-side registration path. After
+starting the server with two separately authenticated temporary PostgreSQL
+roles, a verified Better Auth session, and trusted local HTTPS, it launches
+system Chrome with a **virtual** CTAP2 authenticator capable of user
+verification. Navigation does not silently register anything; only the
+explicit **Register passkey** button launches `navigator.credentials.create`.
+Chrome returns a signed attestation to the separately running HTTPS process.
+The restricted registration SQL role persists precisely one credential for
+the allowed test owner with `enabled=false`, and the approval ledger remains
+empty. After revocation, the server rejects the former session and CSRF
+rather than allowing a second registration challenge. All test credentials,
+browser state, TLS files and SQL fixtures are discarded.
+
+This eliminates the gap between separate browser and separate process-start
+tests. The owner session and authenticator remain **synthetic**. No social
+provider callback, physical passkey, independent public owner deployment or
+Cloud-to-KiCad WSS acceptance has occurred, so the release remains **NO-GO**.

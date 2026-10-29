@@ -7,6 +7,7 @@ import {tmpdir} from "node:os";
 import path from "node:path";
 import {test} from "node:test";
 import {Pool} from "pg";
+import {chromium} from "playwright";
 import {inIsolatedDatabase} from "./isolated-db.js";
 
 const url=process.env.TEST_DATABASE_URL;
@@ -62,7 +63,7 @@ async function grantLoginRole(db:Pool,role:"cloud_cli_owner_id"|"cloud_cli_owner
   await db.query(sql);
   return password;
 }
-test("built owner CLI: separate DB roles, real HTTPS owner session and challenge",
+test("compiled owner CLI: isolated roles, Chrome WebAuthn and revoked session",
   {skip:!url,timeout:110_000},async()=>{
     await inIsolatedDatabase(url!,schemaMigration,async db=>{
       const schema=(await db.query<{name:string}>(
@@ -71,6 +72,7 @@ test("built owner CLI: separate DB roles, real HTTPS owner session and challenge
         throw Error("Unsafe acceptance fixture schema");
       const tmp=await mkdtemp(path.join(tmpdir(),"cloud-owner-cli-e2e-"));
       let proc:ChildProcess|undefined;
+      let browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
       let idCreated=false,regCreated=false;
       try{
         const idPassword=await grantLoginRole(db,"cloud_cli_owner_id");
@@ -197,7 +199,45 @@ test("built owner CLI: separate DB roles, real HTTPS owner session and challenge
         )).rows[0]?.n,1,"Only a one-use registration challenge was created");
         assert.equal((await db.query<{n:number}>(
           "SELECT count(*)::integer AS n FROM owner_read_passkeys"
-        )).rows[0]?.n,0,"No passkey registration without physical verification");
+        )).rows[0]?.n,0,"An unused registration challenge cannot enroll a passkey");
+
+        // Exercise the REAL compiled HTTPS acceptance listener with Chrome's
+        // WebAuthn API. The authenticator is VIRTUAL and the fixture owner
+        // session is synthetic; this is not physical user acceptance.
+        browser=await chromium.launch({channel:"chrome",headless:true,
+          args:["--no-proxy-server"]});
+        const context=await browser.newContext({ignoreHTTPSErrors:true});
+        try{
+          const encoded=encodeURIComponent(token+"."+
+            createHmac("sha256",authSecret).update(token).digest("base64"));
+          await context.addCookies([{
+            url:origin,name:"__Secure-better-auth.session_token",
+            value:encoded,secure:true,httpOnly:true,sameSite:"Lax"
+          }]);
+          const page=await context.newPage();
+          const devtools=await context.newCDPSession(page);
+          await devtools.send("WebAuthn.enable");
+          await devtools.send("WebAuthn.addVirtualAuthenticator",{options:{
+            protocol:"ctap2",transport:"internal",hasResidentKey:true,
+            hasUserVerification:true,isUserVerified:true,
+            automaticPresenceSimulation:true
+          }});
+          const opened=await page.goto(origin+"/owner-passkey/register");
+          assert.equal(opened?.status(),200,
+            "Actual Chrome owner navigation requires signed first-party session");
+          assert.equal((await db.query<{n:number}>(
+            "SELECT count(*)::integer AS n FROM owner_read_passkeys"
+          )).rows[0]?.n,0,"Page load must never silently register");
+          await page.getByRole("button",{name:"Register passkey"}).click();
+          await page.getByText(/registered but not activated/i)
+            .waitFor({timeout:20_000});
+          const created=await db.query<{owner_sub:string;enabled:boolean}>(
+            "SELECT owner_sub,enabled FROM owner_read_passkeys");
+          assert.equal(created.rowCount,1);
+          assert.equal(created.rows[0]?.owner_sub,owner);
+          assert.equal(created.rows[0]?.enabled,false,
+            "Successful virtual WebAuthn registration must remain inactive");
+        }finally{await context.close();}
         assert.equal((await db.query<{n:number}>(
           "SELECT count(*)::integer AS n FROM owner_read_approvals"
         )).rows[0]?.n,0,"No project approval can result from enrollment");
@@ -209,6 +249,7 @@ test("built owner CLI: separate DB roles, real HTTPS owner session and challenge
           JSON.stringify({csrf:data.csrf}))).status,403,
           "Revoked owner sessions cannot reuse previously issued CSRF tokens");
       }finally{
+        await browser?.close();
         if(proc&&!proc.killed){
           proc.kill("SIGTERM");
           await Promise.race([
