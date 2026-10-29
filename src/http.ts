@@ -75,6 +75,9 @@ export type CloudHttpServices={
   pairingDevice?:PairingDevicePort;
   deviceSource?:RequestSourceResolver;
   summaryRelay?:()=>SummaryRelay|null;
+  // Trusted Cloud-to-owner HTTPS delivery only. If absent, /prepare
+  // cannot claim success; a bearer client must never self-register scope.
+  ownerIntentDelivery?:(scope:PreparedOwnerSummary)=>Promise<string|null>;
 };
 
 /** Named optional services prevent misleading positional dependency wiring. */
@@ -311,8 +314,16 @@ async function handleRequest(
           const intent=preparations.prepare(matched[1],oauth,
             fields.deviceId,fields.projectId,
             ()=>relay.prepareOwnerSummary(oauth,fields.deviceId as string,fields.projectId as string));
-          if(!intent){deny(res,404,"not_available");return;}
-          json(res,200,{requestId:intent.requestId,
+          if(!intent||!services.ownerIntentDelivery){
+            deny(res,404,"not_available");return;
+          }
+          let reviewUrl:string|null;
+          try{reviewUrl=await services.ownerIntentDelivery(intent);}
+          catch{reviewUrl=null;}
+          if(!reviewUrl||intent.expiresAtUnixMs<=Date.now()){
+            deny(res,404,"not_available");return;
+          }
+          json(res,200,{reviewUrl,requestId:intent.requestId,
             ownerSub:intent.ownerSub,clientId:intent.clientId,
             deviceId:intent.deviceId,projectId:intent.projectId,
             operation:intent.operation,origin:intent.origin,

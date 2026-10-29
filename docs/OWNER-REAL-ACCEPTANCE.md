@@ -234,3 +234,29 @@ cover deliberate click and user-verification behavior. **No real OAuth
 provider session, physical passkey or independently authenticated
 Cloud-to-owner trusted intent exchange exists yet.** These tests do not
 authorize deployment, activation, merge or real local KiCad reads.
+
+### Signed inter-service intent transport, synthetic acceptance
+
+A DRAFT-only Ed25519 signed scope envelope now connects the Cloud
+two-phase HTTP `/prepare` contract to the independent owner-issuer
+`addTrustedIntent` method in a separate verified HTTPS process.
+`test/owner-read-intent-transfer.test.ts` creates ephemeral Ed25519
+sender/public verifier keys and localhost TLS, exercises actual HTTPS
+delivery, checks exact scope and validates that forged, wrong-key,
+modified, expired and concurrent replay requests cannot enroll a review
+intent. `test/http.test.ts` additionally refuses a prepared read if
+trusted owner delivery is not configured or failed.
+
+The authoritative owner-credential selector runs in the independent
+issuer's trust boundary, never with credential IDs provided by the OAuth
+client or Cloud request. The two signing keys are roles, not secrets
+committed to this repository: only Cloud may hold its Ed25519 *private*
+signing key; the owner issuer is allowed only its *public* verification
+key. Browser session authentication/CSRF/WebAuthn UV remains separately
+required to produce the actual read receipt.
+
+These signing/receiving pieces remain deliberately **unmounted** in real
+runtime composition. This is synthetic HTTPS/cryptographic contract
+acceptance only, **not** real GitHub OAuth login, human owner verification,
+physical WebAuthn, independently deployed authority or local KiCad WSS
+acceptance. Do not merge or enable remote reads.

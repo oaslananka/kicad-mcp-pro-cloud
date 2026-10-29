@@ -300,6 +300,9 @@ function testPrepared(
   });
 }
 const summaryPath="/api/v1/connector/project-summary";
+const testIntentDelivery=async(scope:PreparedOwnerSummary)=>(
+  "https://owner.example.test/owner-read/review?requestId="+scope.requestId
+);
 async function postLoopbackSummary(
   origin:string,route:"prepare"|"complete",bearer:string,body:string
 ):Promise<Response>{
@@ -364,7 +367,7 @@ test("Cloud HTTP read refuses grant revocation after relay result but before rep
         files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
     }
   };
-  const proxy=createHttpServer(config,boundedInventory,verify,{summaryRelay:()=>relay});
+  const proxy=createHttpServer(config,boundedInventory,verify,{summaryRelay:()=>relay,ownerIntentDelivery:testIntentDelivery});
   await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
   try{
     const port=(proxy.address() as AddressInfo).port;
@@ -409,7 +412,7 @@ test("Cloud HTTP read denies token expiry during the final awaited project looku
         files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
     }
   };
-  const proxy=createHttpServer(config,delayedInventory,expiryVerifier,{summaryRelay:()=>relay});
+  const proxy=createHttpServer(config,delayedInventory,expiryVerifier,{summaryRelay:()=>relay,ownerIntentDelivery:testIntentDelivery});
   await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
   try{
     const port=(proxy.address() as AddressInfo).port;
@@ -454,7 +457,7 @@ test("Cloud HTTP read denies token revocation during the final project lookup",a
         files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
     }
   };
-  const proxy=createHttpServer(config,boundedInventory,verify,{summaryRelay:()=>relay});
+  const proxy=createHttpServer(config,boundedInventory,verify,{summaryRelay:()=>relay,ownerIntentDelivery:testIntentDelivery});
   await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
   try{
     const port=(proxy.address() as AddressInfo).port;
@@ -487,7 +490,7 @@ test("Cloud read route is absent without connector and validates OAuth and paylo
         files:{projectPresent:true,boardPresent:false,schematicPresent:false}};
     }
   };
-  const proxy=createHttpServer(config, inventory, verify, {grants:grants, summaryRelay:()=>mockRelay});
+  const proxy=createHttpServer(config, inventory, verify, {grants:grants, summaryRelay:()=>mockRelay,ownerIntentDelivery:testIntentDelivery});
   await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
   const origin="http://127.0.0.1:"+(proxy.address() as AddressInfo).port;
   try{
@@ -550,7 +553,7 @@ test("prepared HTTP request is token-bound, single-use, scope-bound and not a be
   };
   const verifier:Verifier=token=>token==="alternate-signed-token"
     ? verify("test-user-a") : verify(token);
-  const proxy=createHttpServer(config,inventory,verifier,{summaryRelay:()=>relay});
+  const proxy=createHttpServer(config,inventory,verifier,{summaryRelay:()=>relay,ownerIntentDelivery:testIntentDelivery});
   await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
   const origin="http://127.0.0.1:"+(proxy.address() as AddressInfo).port;
   const start=async()=>{
@@ -612,5 +615,40 @@ test("prepared HTTP request is token-bound, single-use, scope-bound and not a be
       "Legacy direct read payload cannot dispatch a connector request");
   }finally{
     await new Promise<void>(r=>proxy.close(()=>r()));
+  }
+});
+
+
+test("Cloud prepared HTTP read fails closed without authenticated owner delivery",async()=>{
+  let reads=0;
+  const relay={
+    prepareOwnerSummary:testPrepared,
+    async requestSummary(){
+      reads++;
+      return null;
+    }
+  };
+  const noDelivery=createHttpServer(config,inventory,verify,{
+    summaryRelay:()=>relay
+  });
+  const deniedDelivery=createHttpServer(config,inventory,verify,{
+    summaryRelay:()=>relay,
+    ownerIntentDelivery:async()=>null
+  });
+  try{
+    for(const proxy of [noDelivery,deniedDelivery]){
+      await new Promise<void>(done=>proxy.listen(0,"127.0.0.1",done));
+      const endpoint="http://127.0.0.1:"+
+        (proxy.address() as AddressInfo).port;
+      const attempt=await prepareHttpRead(endpoint,"test-user-a",
+        JSON.stringify({deviceId:mockProject.deviceId,projectId:id}));
+      assert.equal(attempt.status,404,
+        "Client cannot obtain a preparatory request without trusted issuer delivery");
+      assert.equal(reads,0);
+    }
+  }finally{
+    for(const proxy of [noDelivery,deniedDelivery]){
+      if(proxy.listening)await new Promise<void>(done=>proxy.close(()=>done()));
+    }
   }
 });

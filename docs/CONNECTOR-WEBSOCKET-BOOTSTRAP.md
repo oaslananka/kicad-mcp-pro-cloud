@@ -708,3 +708,43 @@ intent transport must prove that the request matches Cloud's live
 prepared owner/OAuth/client/device/project binding; exposing a public
 `addTrustedIntent` endpoint or accepting a client's copied JSON scope
 would break the security boundary and is prohibited.
+
+### Signed Cloud-to-independent-owner intent exchange (DRAFT; no deployment)
+
+`src/owner-read-intent-transfer.ts` provides a separate-service HTTPS
+intent delivery contract. Cloud, **after** validating the user's
+`projects:read` OAuth token, device/project binding and live socket,
+signs the server-generated `PreparedOwnerSummary` with its own
+**Ed25519 private key**. The only accepted signature domain is
+`kicad-owner-read-intent-v1`, covering exactly the owner, OAuth client,
+device, project, Cloud HTTPS origin, `project_summary`, request UUID and
+30-second expiry. The request is sent by Cloud itself using normal TLS
+verification to one explicitly configured HTTPS owner-authority origin at
+`POST /internal/owner-read/intent`; redirects and unsigned responses are
+never followed. OAuth bearer tokens, Cloud database connections and signing
+private keys are **not** sent to the owner authority.
+
+The independent authority's separate receiver requires the pinned **Cloud
+Ed25519 PUBLIC key**, exact Cloud HTTPS origin, valid bounded signature and
+scope, and a fresh one-time request ID. It independently resolves a currently
+enabled owner passkey credential using its own trusted credential selector,
+then calls the existing `addTrustedIntent` server-side method. Invalid,
+duplicate, expired, tampered, oversized, forwarded-host, bearer-cookie or
+unrecognized requests are denied before challenge creation; authenticated
+intake is at most 128 pending entries. The browser/OAuth client has NO
+endpoint to register a scope or select a passkey. The returned owner review
+URL is a locator, NOT an authorization token: viewing and approval still
+require the independently authenticated owner session, CSRF and UV-verified
+physical passkey. An approved PostgreSQL receipt still has to be consumed
+once by Cloud's independent receipt-consumer role.
+
+`src/http.ts` now requires the explicitly injected trusted
+`ownerIntentDelivery` before `/prepare` can return an HTTP 200. Failed
+HTTPS delivery, missing service wiring and expired intents fail closed
+without exposing a usable request ID. **Neither Cloud main.ts nor the
+standalone acceptance CLI wires the signer/receiver or loads their keys**:
+these are testable library contracts, NOT deployed production endpoints.
+No signing key is created or persisted in this repository. Production key
+provisioning, trusted Cloud source identity, independent owner DNS/OAuth app,
+passkey activation, real operator and hardware KiCad E2E still require
+separate acceptance. The release remains **NO-GO**.
