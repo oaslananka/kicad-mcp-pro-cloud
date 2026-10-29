@@ -152,3 +152,28 @@ protected by `HttpOnly`, `Secure`, `SameSite=Lax`, and denial of forged
 Origin / direct GET. No browser state tokens, cookies or OAuth secrets are
 printed in test output. This proves **only OAuth initiation**, not a GitHub
 callback, an actual owner session, a real OAuth app or human passkey acceptance.
+
+### Real compiled acceptance-process / PostgreSQL role smoke test
+
+`test/owner-acceptance-cli.test.ts` runs the actual compiled
+`dist/owner-acceptance-cli.js` process with short-lived, randomly generated
+credential passwords for **two distinct PostgreSQL login roles**, not a
+mocked in-process router. On a disposable PostgreSQL 17 schema, the
+independent identity login has access to Better Auth's tables and the
+registration login has only the exact columns/operations required for
+inactive credential enrollment. The test uses certificate-validated HTTPS
+on loopback, proves that the health endpoint reports the connector,
+approval and activation as disabled, and verifies that the compiled
+acceptance process accepts a genuinely signed Better Auth session cookie.
+A valid owner session starts one registration challenge; a revoked session
+cannot reuse the same cookie/CSRF token, and no credential or project
+approval is created by requesting an enrollment challenge.
+
+The test generates TLS certificates, role passwords, owner session and
+issuer configuration only in the disposable environment and deletes them
+after completion. It does not use production OAuth credentials or contact
+GitHub. **Chrome-based virtual WebAuthn attestation remains independently
+covered by the browser registration tests**, not this process-launch smoke
+test. Consequently this still does not demonstrate a human's passkey,
+OAuth provider callback, or a physical KiCad WSS read. Real-owner NO-GO
+conditions remain unchanged.
