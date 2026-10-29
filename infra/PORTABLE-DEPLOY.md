@@ -241,10 +241,14 @@ have its own authorized age decryption identity from Doppler, plus reviewed
 SSH access; optional `OFFSITE_RESTORE_DOPPLER_PROJECT` and
 `OFFSITE_RESTORE_DOPPLER_CONFIG` select that independent machine's Doppler
 configuration. Existing backups remain encrypted end to end and are never
-implicitly copied during application installation. The legacy offsite
-scheduled job uses a separate owner-private endpoint config file and is **not**
-part of this new-server installation; its installation was not approved and
-must not be silently enabled or worked around.
+implicitly copied during application installation. The separately installed
+daily user-level timer uses the **same Doppler configuration** via
+`scripts/doppler-runtime.sh`; it does not create or consume a second endpoint
+configuration file. Only after an approved destination is provisioned, the
+independent restore machine is accepted, and the source environment passes
+the fail-closed preflight, run `bash scripts/install-offsite-backup-timer.sh`
+on the intended source VPS. Application installation and deployment never
+install or enable this timer implicitly.
 
 Doppler is a *configuration source*, not a magic live reconfiguration engine:
 existing PostgreSQL passwords are not rotated merely by changing

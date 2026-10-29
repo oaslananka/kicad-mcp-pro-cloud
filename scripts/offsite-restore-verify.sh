@@ -5,7 +5,7 @@
 set -euo pipefail
 umask 077
 if [[ $# -ne 1 ]]; then
-  echo 'Usage: EXPECTED_SHA256=<digest> EXPECTED_SCHEMA_VERSION=6 doppler run -p kicad-mcp-pro -c prd_cloud -- bash scripts/offsite-restore-verify.sh /private/backup.pg.age' >&2
+  echo 'Usage: EXPECTED_SHA256=<digest> EXPECTED_SCHEMA_VERSION=<reviewed-version> doppler run -p kicad-mcp-pro -c prd_cloud -- bash scripts/offsite-restore-verify.sh /private/backup.pg.age' >&2
   exit 2
 fi
 archive="$1"
@@ -19,11 +19,12 @@ mode=$(stat -c '%a' "$archive")
 [[ "$(sha256sum "$archive" | awk '{print $1}')" == "$EXPECTED_SHA256" ]] || {
   echo 'Encrypted offsite archive differs from source receipt' >&2; exit 1;
 }
-[[ "${EXPECTED_SCHEMA_VERSION:-}" =~ ^([1-9]|1[0-2])$ ]] || {
-  echo 'Expected reviewed schema version 1-12 required' >&2; exit 2;
+[[ "${EXPECTED_SCHEMA_VERSION:-}" =~ ^[1-9][0-9]{0,2}$ ]] || {
+  echo 'Expected positive reviewed schema version required' >&2; exit 2;
 }
-[[ "${EXPECTED_LEDGER:-}" =~ ^[1-9][0-9]*:[a-f0-9]{32}$ ]] || {
-  echo 'Source migration checksum receipt is required' >&2; exit 2;
+[[ "${EXPECTED_LEDGER:-}" =~ ^[1-9][0-9]*:[a-f0-9]{32}$ &&
+    "${EXPECTED_LEDGER%%:*}" == "$EXPECTED_SCHEMA_VERSION" ]] || {
+  echo 'Source migration checksum receipt/count must match schema version' >&2; exit 2;
 }
 [[ -n "${KICAD_BACKUP_AGE_IDENTITY:-}" && -n "${KICAD_BACKUP_AGE_RECIPIENT:-}" ]] || {
   echo 'Independent operator must provide authorized age identity through secret manager' >&2; exit 2;

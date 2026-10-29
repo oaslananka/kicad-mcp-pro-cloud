@@ -5,6 +5,10 @@ on:
   pull_request:
 permissions:
   contents: read
+# Cancel only superseded PR validations; main's trusted deploy signal must never be canceled.
+concurrency:
+  group: cloud-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -24,8 +28,8 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql://test:test@127.0.0.1:5432/kicad_cloud_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: npm
@@ -39,6 +43,8 @@ jobs:
           bash -n scripts/offsite-restore-verify.sh
           bash -n scripts/offsite-backup-push.sh
           bash -n scripts/install-offsite-backup-timer.sh
+          bash -n scripts/offsite-restore-verify.sh
+          bash -n scripts/offsite-backup-push.sh
           bash -n scripts/production-deploy-if-ready.sh
           bash -n scripts/doppler-runtime.sh
           bash -n scripts/setup-vps-doppler.sh
@@ -54,6 +60,8 @@ jobs:
             echo "Restore drill accepted an unsupported action" >&2
             exit 1
           fi
+      - name: Verify Doppler-only offsite backup timer contracts (offline fixtures)
+        run: node --test scripts/test-offsite-scheduler.mjs
       - name: Validate production Compose topology and healthcheck
         run: node scripts/check-production-compose.mjs
       - name: Verify portable Doppler deployment contracts (offline fixtures)
@@ -71,7 +79,21 @@ jobs:
         run: node --test scripts/test-cloudflare-edge.mjs
       - name: Validate Cloudflare Free edge Worker candidate offline
         run: node --test scripts/test-edge-worker-candidate.mjs
-      - name: Build secret-free OCI image
-        run: docker build -t kicad-mcp-pro-cloud:ci .
+      - name: Build and verify minimal production OCI image
+        run: |
+          docker build -t kicad-mcp-pro-cloud:ci .
+          docker run --rm --network none --entrypoint /bin/sh kicad-mcp-pro-cloud:ci -ec '
+            test "$(id -u)" -eq 1000
+            command -v node >/dev/null
+            test -f dist/main.js
+            test -d node_modules
+            test ! -d /usr/local/lib/node_modules/npm
+            for manager in npm npx corepack yarn yarnpkg; do
+              if command -v "$manager" >/dev/null 2>&1; then
+                echo "Unexpected package manager in production runtime: $manager" >&2
+                exit 1
+              fi
+            done
+          '
       - name: Prove ephemeral PostgreSQL backup and restore
         run: bash scripts/ci-db-restore-drill.sh kicad-mcp-pro-cloud:ci
