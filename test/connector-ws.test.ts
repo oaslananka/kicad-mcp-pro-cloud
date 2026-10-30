@@ -61,7 +61,7 @@ function field(obj:Record<string,unknown>,key:string):string{
   return obj[key] as string;
 }
 
-async function startFixtureServer(db:Pool){
+async function startFixtureServer(db:Pool,operatorLocalOnce=false){
   const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
   await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
   const port=(server.address() as AddressInfo).port;
@@ -69,7 +69,8 @@ async function startFixtureServer(db:Pool){
     publicOrigin:"http://127.0.0.1:"+port,
     sourceOf:()=>"127.0.0.1",
     proofs:new PgDeviceHandshakes(db),
-    ownerConsent:{consume:async()=>true}, // Synthetic fixture, not human approval.
+    ...(operatorLocalOnce?{operatorLocalOnce:true}:
+      {ownerConsent:{consume:async()=>true}}), // Synthetic, not human approval.
     connections:new BoundConnectorConnections(
       new PgConnectorSessions(db),new PgConnectorReadGate(db))
   });
@@ -176,7 +177,7 @@ test("invalid device signature never starts an authenticated connector session",
 
 test("authenticated Cloud socket rejects revocation and expired reads after wall-clock rollback",
   {skip:!url,timeout:90_000},async()=>{
-  for(const revocation of ["none","grant","device","token","clock_rollback"] as const){
+  for(const revocation of ["none","local_once","grant","device","token","clock_rollback"] as const){
     await inIsolatedDatabase(url!,migrations,async db=>{
       const owner="summary-owner",clientId="approved-client";
       const keys=generateKeyPairSync("ed25519");
@@ -195,7 +196,8 @@ test("authenticated Cloud socket rejects revocation and expired reads after wall
         "VALUES($1,$2,$3,'Fixture',true,'readonly')",[project,owner,device]);
       await db.query("INSERT INTO project_client_grants(project_id,owner_sub,client_id,enabled,max_mode) "+
         "VALUES($1,$2,$3,true,'readonly')",[project,owner,clientId]);
-      const {server,port,attached}=await startFixtureServer(db);
+      const {server,port,attached}=await startFixtureServer(
+        db,revocation==="local_once");
       let ws:WebSocket|undefined;
       const actualDateNow=Date.now;
       try{
@@ -272,12 +274,13 @@ test("authenticated Cloud socket rejects revocation and expired reads after wall
         const reply={kind:"connector.local_read_preview",version:1,
           requestId:request.requestId,projectId:project,operation:"project_summary",
           files:{projectPresent:true,boardPresent:false,schematicPresent:true}};
-        const ack=revocation==="none" ? waitMessage(ws) : null;
-        const close=revocation==="none" ? null : waitClose(ws);
+        const success=revocation==="none"||revocation==="local_once";
+        const ack=success ? waitMessage(ws) : null;
+        const close=success ? null : waitClose(ws);
         ws.send(JSON.stringify({kind:"connector.read_result",version:1,
           sequence:1,result:reply}));
         const result=await pending;
-        if(revocation!=="none"){
+        if(!success){
           assert.equal(result,null,"Must not return private project metadata after "+revocation);
           assert.equal(await close,1008,"Must close the revoked socket without an ACK");
         }else{

@@ -75,6 +75,9 @@ export type CloudHttpServices={
   pairingDevice?:PairingDevicePort;
   deviceSource?:RequestSourceResolver;
   summaryRelay?:()=>SummaryRelay|null;
+  // Metadata-only, owner-granted + manually started local one-shot pilot.
+  // Never enable this from an untrusted request or merely from WS presence.
+  mcpProjectPresenceEnabled?:boolean;
   // Trusted Cloud-to-owner HTTPS delivery only. If absent, /prepare
   // cannot claim success; a bearer client must never self-register scope.
   ownerIntentDelivery?:(scope:PreparedOwnerSummary)=>Promise<string|null>;
@@ -154,7 +157,8 @@ async function handleRequest(
         }
       }
       if (path === "/health" && req.method === "GET") {
-        json(res, 200, { status: "ok", mcp: "/mcp", remoteConnector: "not_implemented",
+        json(res, 200, { status: "ok", mcp: "/mcp", remoteConnector: services.mcpProjectPresenceEnabled
+          ? "operator_one_shot_presence" : "not_implemented",
           revision: /^[0-9a-f]{40}$/.test(process.env.APP_REVISION ?? "") ? process.env.APP_REVISION : "unknown" });
         return;
       }
@@ -411,7 +415,36 @@ async function handleRequest(
       const request = new Request(config.publicOrigin + "/mcp", {
         method: "POST", headers, body: bytes.toString("utf8")
       });
-      const handler = createCloudMcpHandler(inventory, actor);
+      const presenceReader=services.mcpProjectPresenceEnabled&&summaryRelay?.()
+        ? async(deviceId:string,projectId:string)=>{
+          // The MCP tool never accepts paths, owner IDs or OAuth client IDs.
+          // All identities come from the verified bearer and Cloud inventory.
+          const project=await inventory.getProject(actor.sub,actor.clientId,projectId);
+          if(!project||project.deviceId!==deviceId)return null;
+          if(!await inventory.isAccessTokenAllowed(
+            actor.sub,actor.clientId,actor.issuedAt))return null;
+          try{await verify(matched[1]);}catch{return null;}
+          const relay=summaryRelay();
+          if(!relay)return null;
+          const oauth={ownerSub:actor.sub,clientId:actor.clientId,
+            accessTokenIssuedAtSeconds:actor.issuedAt};
+          const intent=relay.prepareOwnerSummary(oauth,deviceId,projectId);
+          if(!intent)return null;
+          const result=await relay.requestSummary(oauth,deviceId,projectId,intent);
+          if(!result||result.requestId!==intent.requestId||
+            result.projectId!==projectId||result.operation!=="project_summary")
+            return null;
+          // Revocation or expiry during the remote request cannot release a
+          // stale project presence result, even if the local socket answered.
+          const current=await inventory.getProject(actor.sub,actor.clientId,projectId);
+          if(!current||current.deviceId!==deviceId)return null;
+          try{await verify(matched[1]);}catch{return null;}
+          if(!await inventory.isAccessTokenAllowed(
+            actor.sub,actor.clientId,actor.issuedAt))return null;
+          const {projectPresent,boardPresent,schematicPresent}=result.files;
+          return {projectPresent,boardPresent,schematicPresent};
+        } : undefined;
+      const handler=createCloudMcpHandler(inventory,actor,presenceReader);
       let output: Response;
       try {
         output = await handler.fetch(request);

@@ -9,18 +9,28 @@ const text = (value: object) => ({
 });
 const readonly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 
-export function createCloudMcpHandler(inventory: Inventory, actor: Actor) {
+export type ProjectPresenceFiles = Readonly<{
+  projectPresent:boolean;boardPresent:boolean;schematicPresent:boolean;
+}>;
+export type ProjectPresenceReader =
+  (deviceId:string,projectId:string)=>Promise<ProjectPresenceFiles|null>;
+
+export function createCloudMcpHandler(
+  inventory: Inventory, actor: Actor, projectPresence?:ProjectPresenceReader
+) {
   return createMcpHandler(() => {
     const mcp = new McpServer({ name: "kicad-mcp-pro-cloud", version: "0.1.0" });
     mcp.registerTool("get_service_status", {
       description: "Describe Cloud connectivity limits and current feature availability. No local KiCad operation is performed.",
       inputSchema: z.object({}), annotations: readonly
     }, async () => text({
-      status: "foundation_only",
+      status: projectPresence ? "local_presence_pilot" : "foundation_only",
       remoteKiCadExecution: false,
-      devicePairing: false,
+      devicePairing: Boolean(projectPresence),
       projectManagementWrites: false,
-      message: "Cloud inventory is read-only. A local connector is not yet available."
+      message: projectPresence
+        ? "Only one-shot, owner-granted project presence flags are available; no KiCad commands or file contents."
+        : "Cloud inventory is read-only. A local connector is not yet available."
     }));
     mcp.registerTool("list_devices", {
       description: "List the authenticated user's registered device metadata. Connected always false until a verified device relay exists.",
@@ -37,6 +47,23 @@ export function createCloudMcpHandler(inventory: Inventory, actor: Actor) {
       const project = await inventory.getProject(actor.sub,actor.clientId,project_id);
       return text(project ? { project } : { found: false, message: "Project not found or not accessible" });
     });
+    // Pilot presence read is an opt-in Cloud capability. No native commands,
+    // file contents, local paths, or editing tools are exposed over MCP.
+    if(projectPresence){
+      mcp.registerTool("get_project_presence",{
+        description:"Read only the three presence booleans for one already granted KiCad project. Requires an explicitly started, one-shot local device session. No board contents or commands.",
+        inputSchema:z.object({project_id:z.string().uuid()}),annotations:readonly
+      },async ({project_id})=>{
+        const project=await inventory.getProject(actor.sub,actor.clientId,project_id);
+        if(!project)return text({available:false});
+        // A disconnected device or failed authorization is unavailable.
+        // Do not leak backend diagnostics through a public MCP tool.
+        let files:ProjectPresenceFiles|null=null;
+        try{files=await projectPresence(project.deviceId,project_id);}
+        catch{files=null;}
+        return text(files?{available:true,files}:{available:false});
+      });
+    }
     return mcp;
   });
 }

@@ -17,6 +17,38 @@ Enablement requires the explicit server-side
 and no new path becomes available merely by merging this PR. Never add
 secrets to GitHub Actions beyond the repository's existing Doppler token.
 
+## Minimum viable Cloud pilot (disabled by default)
+
+For an initial owner-operated, **metadata-only** trial, the existing Cloud
+origin, existing GitHub OAuth App, and browser device/project/client grants
+are enough on the Cloud side. No second OAuth App, passkey issuer, domain,
+persistent staging service or new transport protocol is needed for this
+lower-assurance pilot. The owner still needs to pair and enable the physical
+device and explicitly grant a selected AI OAuth client read access.
+
+Only an explicit `CONNECTOR_OPERATOR_ONESHOT_ENABLED=true` plus existing
+`CONNECTOR_WS_ENABLED=true` and `PAIRING_DEVICE_API_ENABLED=true`, built-in
+Cloud identity and the trusted device ingress allowlist exposes the additional
+MCP tool `get_project_presence(project_id)`. All flags default OFF and the
+Cloud will fail startup if the lightweight mode conflicts with the separate
+owner-consent consumer. The tool accepts an opaque project UUID only, derives
+owner/client/device from the verified bearer and current SQL grant, and returns
+only `projectPresent`, `boardPresent`, `schematicPresent` booleans. The
+device must independently open its *one-shot* local connector session; this
+pilot mode is never background auto-pairing or arbitrary local MCP access.
+
+**Assurance limitation:** the short-lived local CLI consent and initial browser
+project grant are not an independent hardware WebAuthn assertion per read. A
+same-user local process could imitate a terminal prompt. The higher-assurance
+independent issuer implementation is retained for a future decision, but is
+**not a prerequisite for this explicitly limited presence-only pilot**.
+Do not add editable KiCad operations, paths, component data or board contents
+to this mode. Revocation, expiry, owner/device signing, one read per socket and
+SQL project/client scope checks continue to apply. Passing local synthetic
+tests is not proof of a physical device or production Cloud connection.
+Do not enable either route on production until the owner accepts a real,
+revocable Cloud-to-device one-shot test.
+
 ## Exact, strict v1 wire flow
 
 All messages are small (< 1024-byte) UTF-8 text JSON frames. No compression,

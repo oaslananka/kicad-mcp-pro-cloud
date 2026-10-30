@@ -11,11 +11,10 @@ import type {RequestSourceResolver} from "./trusted-ingress.js";
 
 export type DeviceProofPort=Pick<PgDeviceHandshakes,"issue"|"verify"|"cancel">;
 /**
- * A server-verified owner authorization, not the device proof, terminal PTY,
- * OAuth client's consent or a caller-supplied authorization flag.
- * `consume` MUST atomically verify and burn one trusted owner-authenticated
- * challenge bound to this exact read. No implementation is wired in main.ts:
- * without one, even an enabled connector can never dispatch a Cloud read.
+ * High-assurance mode: a separately verified owner approval must be consumed.
+ * The explicit presence-only local pilot is lower assurance; it relies on
+ * an existing owner-granted OAuth project scope and a manually started local
+ * one-shot device session. Neither mode authorizes commands or file contents.
  */
 export type OwnerReadConsentPort={
   consume:(scope:Readonly<{
@@ -103,6 +102,13 @@ export function attachConnectorWebSocket(
     connections:BoundConnectorConnections;
     /** No production owner-consent verifier has been provisioned. Fail closed. */
     ownerConsent?:OwnerReadConsentPort;
+    /**
+     * Explicit no-customer metadata pilot: the owner already granted the
+     * OAuth client/project in Cloud and manually started a one-shot device
+     * process. No independent WebAuthn ceremony is asserted by this mode.
+     * Never use for file contents or executable KiCad operations.
+     */
+    operatorLocalOnce?:boolean;
     maxConnections?:number;
     sourceOf:RequestSourceResolver;
   }
@@ -352,7 +358,7 @@ export function attachConnectorWebSocket(
    */
   function prepareOwnerSummary(oauth:TrustedOAuthReadIdentity,
     deviceId:string,projectId:string):PreparedOwnerSummary|null{
-    if(stopped||!options.ownerConsent||!oauth||
+    if(stopped||(!options.ownerConsent&&!options.operatorLocalOnce)||!oauth||
        typeof oauth.ownerSub!=="string"||!oauth.ownerSub||
        typeof oauth.clientId!=="string"||!oauth.clientId||
        !/^[0-9a-f-]{36}$/i.test(deviceId)||
@@ -383,7 +389,7 @@ export function attachConnectorWebSocket(
 
   async function requestSummary(oauth:TrustedOAuthReadIdentity,deviceId:string,
     projectId:string,prepared?:PreparedOwnerSummary):Promise<SummaryReadResult|null>{
-    if(stopped||!options.ownerConsent||!oauth||typeof oauth.ownerSub!=="string"||
+    if(stopped||(!options.ownerConsent&&!options.operatorLocalOnce)||!oauth||typeof oauth.ownerSub!=="string"||
       !/^[0-9a-f-]{36}$/i.test(deviceId)||
       !/^[0-9a-f-]{36}$/i.test(projectId))return null;
     const active=readyDevices.get(socketKey(oauth.ownerSub,deviceId));
@@ -428,9 +434,10 @@ export function attachConnectorWebSocket(
     let consented:boolean;
     try{
       consented=await Promise.race([
-        options.ownerConsent.consume({oauth,deviceId,projectId,requestId,
-          origin:options.publicOrigin,operation:"project_summary",
-          expiresAtUnixMs:ownerExpiresAtUnixMs}),
+        options.operatorLocalOnce ? Promise.resolve(true) :
+          options.ownerConsent!.consume({oauth,deviceId,projectId,requestId,
+            origin:options.publicOrigin,operation:"project_summary",
+            expiresAtUnixMs:ownerExpiresAtUnixMs}),
         new Promise<boolean>(resolve=>{
           consentTimer=setTimeout(()=>{consentTimedOut=true;resolve(false);},8_000);
           consentTimer.unref();

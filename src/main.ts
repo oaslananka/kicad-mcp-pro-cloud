@@ -33,6 +33,15 @@ const deviceManagement=identity&&connectorPool?new PgDeviceManagement(connectorP
 const pairingReview=identity&&connectorPool?
   new PgPairingReview(connectorPool,process.env.BETTER_AUTH_SECRET??""):undefined;
 const pairingDeviceEnabled=process.env.PAIRING_DEVICE_API_ENABLED==="true";
+// No additional issuer, OAuth App or domain for the optional presence-only
+// pilot. It is deliberately OFF unless the owner explicitly opts in.
+// Local user presence is weaker than independent WebAuthn and must never
+// authorize native commands or return files.
+const operatorLocalOnce=process.env.CONNECTOR_OPERATOR_ONESHOT_ENABLED==="true";
+if(operatorLocalOnce&&(!wsEnabled||!pairingDeviceEnabled||!identity||
+    ownerConsentRuntime||process.env.OWNER_READ_CONSUMER_ENABLED==="true")){
+  throw Error("Local one-shot pilot needs built-in identity, pairing and WS only");
+}
 if(pairingDeviceEnabled&&(!identity||!config.publicOrigin.startsWith("https://"))){
   throw new Error("Device pairing API requires built-in identity and trusted HTTPS ingress");
 }
@@ -47,12 +56,14 @@ const deviceSource=(wsEnabled||pairingDeviceEnabled)?
   configuredDeviceSource(process.env):undefined;
 // Lazy binding keeps all read surfaces absent when connector WS is disabled.
 let connectorRelay:ReturnType<typeof attachConnectorWebSocket>|null=null;
-const server=createHttpServer(config, inventory, createVerifier(config), {grants:inventory, identity:identity, devices:deviceManagement, pairings:pairingReview, pairingDevice:pairingDevice, deviceSource:deviceSource, summaryRelay:()=>connectorRelay});
+const server=createHttpServer(config, inventory, createVerifier(config), {grants:inventory, identity:identity, devices:deviceManagement, pairings:pairingReview, pairingDevice:pairingDevice, deviceSource:deviceSource,
+  mcpProjectPresenceEnabled:operatorLocalOnce,summaryRelay:()=>connectorRelay});
 const connectorWs=wsEnabled&&connectorPool?attachConnectorWebSocket(server,{
   publicOrigin:config.publicOrigin,
   sourceOf:deviceSource!,
   proofs:new PgDeviceHandshakes(connectorPool),
   ...(ownerConsentRuntime?{ownerConsent:ownerConsentRuntime.consent}:{}),
+  operatorLocalOnce,
   connections:new BoundConnectorConnections(
     new PgConnectorSessions(connectorPool),
     new PgConnectorReadGate(connectorPool))

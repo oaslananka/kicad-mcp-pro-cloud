@@ -21,7 +21,9 @@ function page(connections:DisplayConnection[],status=200,extraCookie?:string,not
   const response = new Response(renderConnectionsPage(connections,notice),{status});
   response.headers.set("Content-Type","text/html; charset=utf-8");
   response.headers.set("Cache-Control","no-store");
-  response.headers.set("Referrer-Policy","no-referrer");
+  // Same-origin form POSTs must retain the real Origin; no-referrer sends Origin: null.
+  // Keep referrers hidden from other sites without weakening CSRF/Origin checks.
+  response.headers.set("Referrer-Policy","same-origin");
   response.headers.set("X-Content-Type-Options","nosniff");
   response.headers.set("Content-Security-Policy",
     "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'");

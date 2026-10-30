@@ -652,3 +652,83 @@ test("Cloud prepared HTTP read fails closed without authenticated owner delivery
     }
   }
 });
+
+// The no-customer pilot uses an existing owner grant and an explicitly
+// launched local one-shot process. No independent WebAuthn claim is made.
+test("MCP one-shot presence pilot denies foreign and revoked project access",async()=>{
+  let reads=0,grantActive=true,revokeDuringRead=false;
+  const scoped:Inventory={
+    ...inventory,
+    async getProject(owner,clientId,projectId){
+      if(!grantActive)return null;
+      return inventory.getProject(owner,clientId,projectId);
+    }
+  };
+  const relay={
+    prepareOwnerSummary:testPrepared,
+    async requestSummary(_oauth:unknown,_deviceId:string,projectId:string,
+      prepared:PreparedOwnerSummary){
+      reads++;
+      if(revokeDuringRead)grantActive=false;
+      return {kind:"connector.local_read_preview" as const,version:1 as const,
+        requestId:prepared.requestId,projectId,operation:"project_summary" as const,
+        files:{projectPresent:true,boardPresent:true,schematicPresent:false}};
+    }
+  };
+  const proxy=createHttpServer(config,scoped,verify,{
+    summaryRelay:()=>relay,mcpProjectPresenceEnabled:true
+  });
+  await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
+  const origin="http://127.0.0.1:"+(proxy.address() as AddressInfo).port;
+  const invoke=async(method:string,params:object,token="test-user-a",name?:string)=>{
+    const response=await fetch(origin+"/mcp",{
+      method:"POST",headers:headers(token,method,name),body:payload(method,params)
+    });
+    return {status:response.status,data:await response.json() as Record<string,any>};
+  };
+  try{
+    const health=await fetch(origin+"/health");
+    assert.equal((await health.json()).remoteConnector,"operator_one_shot_presence");
+    const tools=await invoke("tools/list",{});
+    assert.equal(tools.status,200);
+    const all=(tools.data.result?.tools??[]).map((t:{name:string})=>t.name);
+    assert.ok(all.includes("get_project_presence"));
+    assert.equal(all.some((n:string)=>/run_drc|run_erc|write|delete/.test(n)),false);
+    const bad=await invoke("tools/call",{
+      name:"get_project_presence",arguments:{project_id:id}
+    },"invalid","get_project_presence");
+    assert.equal(bad.status,401);
+    const foreign=await invoke("tools/call",{
+      name:"get_project_presence",arguments:{project_id:id}
+    },"test-user-b","get_project_presence");
+    assert.equal(foreign.status,200);
+    assert.match(JSON.stringify(foreign.data),/available/);
+    assert.doesNotMatch(JSON.stringify(foreign.data),/boardPresent/);
+    assert.equal(reads,0);
+    const present=await invoke("tools/call",{
+      name:"get_project_presence",arguments:{project_id:id}
+    },"test-user-a","get_project_presence");
+    assert.equal(present.status,200,JSON.stringify(present.data));
+    assert.match(JSON.stringify(present.data),/"projectPresent":true/);
+    assert.match(JSON.stringify(present.data),/"boardPresent":true/);
+    assert.doesNotMatch(JSON.stringify(present.data),/USB-C Controller|\/home\/|localPath|run_drc/);
+    assert.equal(reads,1);
+    revokeDuringRead=true;
+    const revoked=await invoke("tools/call",{
+      name:"get_project_presence",arguments:{project_id:id}
+    },"test-user-a","get_project_presence");
+    assert.equal(revoked.status,200);
+    assert.doesNotMatch(JSON.stringify(revoked.data),/boardPresent/);
+    assert.match(JSON.stringify(revoked.data),/"available":false/);
+    assert.equal(reads,2);
+    grantActive=true;revokeDuringRead=false;accessAllowed=false;
+    const cutoff=await invoke("tools/call",{
+      name:"get_project_presence",arguments:{project_id:id}
+    },"test-user-a","get_project_presence");
+    assert.equal(cutoff.status,401);
+    assert.equal(reads,2);
+  }finally{
+    grantActive=true;revokeDuringRead=false;accessAllowed=true;
+    await new Promise<void>(resolve=>proxy.close(()=>resolve()));
+  }
+});

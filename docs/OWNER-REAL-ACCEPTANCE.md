@@ -4,6 +4,17 @@ Status: **NO-GO** (29 October 2026). Scope: `oaslananka/kicad-mcp-pro-cloud`
 draft PR #64 only. This is a **human/physical acceptance plan**, not proof
 that the production connector is available, and not a request to turn it on.
 
+**Pilot scope clarification:** The separate hardware passkey issuer below
+describes the original higher-assurance per-request approval path. The
+independently disabled `CONNECTOR_OPERATOR_ONESHOT_ENABLED` Cloud pilot
+uses the existing owner OAuth/browser project grant and a manually launched
+one-shot local connector for **presence flags only**. No second OAuth
+application, dedicated domain or passkey server is required for that limited
+scope. The pilot does **not** claim fresh independent human verification;
+all device signature, authorization, revocation and physical one-shot
+acceptance requirements still apply before production enablement.
+See `docs/CONNECTOR-WEBSOCKET-BOOTSTRAP.md`.
+
 ## Verified evidence (do not substitute synthetic tests for human proof)
 
 | Surface | Evidence | Accepted? |
