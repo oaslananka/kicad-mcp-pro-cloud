@@ -104,6 +104,24 @@ Never copy the example address range from the synthetic tests blindly.
    dual-homing to both networks is an explicit, short-lived maintenance
    state that **cannot** pass the final topology preflight.
 
+## Protected deployment watcher after ingress cutover
+
+Before the operator-approved network transition, configure the existing
+production systemd deployment service with
+`KICAD_CLOUD_PRODUCTION_INGRESS=isolated` and verify that the service
+inherits it. The default remains `shared`; unknown values are rejected.
+The protected main-CI-only watcher uses the same two Compose files on app
+recreation and image rollback, validates their configuration before
+building, and refuses the shared configuration if the live app already
+uses the private ingress bridge. The separate tunnel connector is never
+started by the watcher's app-only deployment command.
+
+Do not select this mode, launch the overlay or migrate the app until
+the existing dedicated tunnel credential, routing, edge safeguards,
+recovery and private-network acceptance have passed. The running
+production watcher script version must be updated safely BEFORE
+any network cutover; changing a DRAFT PR does not change that script.
+
 ## Operator-reviewed cutover sequence (future ONLY)
 
 The following steps describe required **outcomes**, not an executable
