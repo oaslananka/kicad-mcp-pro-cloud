@@ -48,7 +48,10 @@ test("security pages share brand/navigation while preserving authorization forms
     assert.match(html,/class="brand-mark"/);
     assert.match(html,/aria-label="KiCad MCP Cloud home"/);
     assert.match(html,/<svg[^>]+aria-hidden="true"/);
-    assert.doesNotMatch(html,/<script[\s>]/i);
+    if (html === pages[5]) {
+      assert.match(html, /src="\/assets\/pairing-review\.js"/);
+      assert.doesNotMatch(html, /<script(?![^>]*src=)/i);
+    } else assert.doesNotMatch(html, /<script[\s>]/i);
   }
   assert.match(pages[0],/action="\/auth\/start\/github"/);
   assert.match(pages[2],/action="\/connections\/revoke"/);

@@ -46,7 +46,7 @@ async function jsonBody(req:IncomingMessage):Promise<unknown>{
  */
 export async function handlePairingDeviceRequest(
   req:IncomingMessage,res:ServerResponse,api:PairingDevicePort,
-  sourceOf:RequestSourceResolver
+  sourceOf:RequestSourceResolver,publicOrigin?:string
 ):Promise<boolean>{
   const path=(req.url??"").split("?")[0];
   if(path!=="/api/v1/pairing/device/challenge"&&
@@ -81,7 +81,9 @@ export async function handlePairingDeviceRequest(
     if(result.kind!=="ok"){reply(res,400,{error:"unavailable"});return true;}
     reply(res,201,{challengeId:result.data.id,userCode:result.data.userCode,
       deviceCode:result.data.deviceCode,deviceFingerprint:result.data.deviceFingerprint,
-      expiresAtMs:result.data.expiresAtMs});return true;
+      expiresAtMs:result.data.expiresAtMs,
+      ...(publicOrigin?{verificationUriComplete:publicOrigin+"/devices/pairing#challenge="+
+        encodeURIComponent(result.data.id)+"&code="+encodeURIComponent(result.data.userCode)}:{})});return true;
   }
   const fields=redeemSchema.safeParse(parsed);
   if(!fields.success){reply(res,400,{error:"invalid_request"});return true;}

@@ -1,30 +1,11 @@
-# Browser pairing review: default-off, bounded approval
+# Browser pairing review: device-initiated, one-click approval
 
-The built-in Better Auth provider must be configured and independently
-accepted before any browser pairing review is accessible. In current
-external authentication mode, the browser routes are not forwarded.
+Cloud's authenticated pairing review stays feature-gated. Normal users start pairing in the local KiCad client. The device challenge response now adds verificationUriComplete: an absolute first-party /devices/pairing URL with the challenge ID and the human user code in its URL fragment (#challenge=...&code=...). The separate 43-character deviceCode and the Ed25519 private key are never part of that link. The local client must explicitly open the URL; Cloud does not control the local KiCad UI.
 
-GET /devices/pairing requires a verified first-party user and session.
-The form asks for an existing challenge UUID and 12-character user code
-shown on the enrolling device. It does not create challenges or enroll devices.
+The same-origin browser script immediately removes the fragment from the address bar, validates both fields and fills the existing form. The owner verifies the code displayed on the local device and explicitly presses Approve device or Deny. No click or form submission is automated. If the link is absent, the page explains how to start from KiCad and keeps manual code entry under an advanced disclosure. Invalid or duplicate fields never unlock normal approval controls.
 
-POST /devices/pairing/review requires strict same-Origin, bounded form
-fields and an HMAC-signed CSRF token bound to the browser user and
-session, plus a separate HttpOnly, SameSite=Strict state cookie.
-The entered code is never placed in a response URL or application log.
-Approval is terminal, but alone never creates device credentials.
+GET /devices/pairing requires a verified first-party user session. POST /devices/pairing/review continues to require exact Origin, strictly bounded fields, session-bound HMAC CSRF proof with HttpOnly SameSite=Strict cookie. The fragment code is not sent to Cloud as an HTTP GET query, server path or Referrer; it is scrubbed from browser history and submitted only through the existing authenticated same-origin review POST. This is a short-lived review convenience, not a credential grant. A copied link still requires an authenticated owner session; code verification, per-owner throttling, challenge lockout and Ed25519 device proof remain mandatory.
 
-Migration 011 creates an atomic per-owner budget of ten reviews per
-five-minute window, shared across app replicas; missing challenge IDs
-also consume the budget. Each challenge has its own five-guess lockout.
-Only the one-use private-key proof can later create a disabled device.
+Challenge expires in five minutes; approval does not create a live device credential. A properly signed, one-use redeem creates a disabled device; project and client grants remain separate.
 
-This does not substitute ingress/IP throttling, old budget cleanup,
-trusted device challenge issuance, or an independently authenticated
-device redemption transport. None of those are activated in this PR.
-
-Release gates: registered production social OAuth providers, actual
-AI-host OAuth acceptance, server/ingress throttling, audited migrations
-and backup/restore, physical outbound connector tests, secure enrollment
-and project consent. No local KiCad tool, project path or file transfer
-is implemented or authorized.
+LIMITATION: No physical paired device or local auto-launch is proven by this Cloud-only UI change. If the owner is not signed in, establish the session and request a fresh link from the local client. Local KiCad client integration belongs to the separately scoped repository, unchanged here. Pairing/WSS/one-shot flags remain OFF until owner-only security acceptance; public rollout still requires independent distributed edge protection.

@@ -17,6 +17,7 @@ import type {RequestSourceResolver} from "./trusted-ingress.js";
 import { oauthProviderResponse } from "./oauth-error.js";
 import { renderLanding } from "./browser-ui.js";
 import { uiCss } from "./ui-styles.js";
+import {pairingReviewClient} from "./pairing-review-client.js";
 import type {TrustedOAuthReadIdentity} from "./connector-read-gate.js";
 import type {PreparedOwnerSummary,SummaryReadResult} from "./connector-ws.js";
 import {OwnerSummaryHttpPreparations} from "./owner-summary-http-preparations.js";
@@ -115,7 +116,13 @@ async function handleRequest(
         return;
       }
       if(pairingDevice&&await handlePairingDeviceRequest(req,res,pairingDevice,
-        deviceSource??(()=>null)))return;
+        deviceSource??(()=>null),config.publicOrigin))return;
+      if (path === "/assets/pairing-review.js" && req.method === "GET") {
+        res.writeHead(200,{...noCache,"Content-Type":"text/javascript; charset=utf-8",
+          "Referrer-Policy":"no-referrer"});
+        res.end(pairingReviewClient);
+        return;
+      }
       if (path === "/assets/ui.css" && req.method === "GET") {
         res.writeHead(200,{...noCache,"Content-Type":"text/css; charset=utf-8"});
         res.end(uiCss);

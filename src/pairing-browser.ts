@@ -21,7 +21,7 @@ function page(status:number,csrf="",notice?:string,cookie?:string):Response{
   const res=new Response(renderPairingReviewPage(csrf,notice),{status,headers:{
     "Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store",
     "Referrer-Policy":"no-referrer","X-Content-Type-Options":"nosniff",
-    "Content-Security-Policy":"default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'"
+    "Content-Security-Policy":"default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'; script-src 'self'"
   }});
   if(cookie)res.headers.append("Set-Cookie",cookie);
   return res;

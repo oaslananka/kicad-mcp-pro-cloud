@@ -39,8 +39,11 @@ test("pairing review requires session and escapes injected content",async()=>{
   const f=fixture(),res=await get(f);
   assert.equal(res?.status,200);
   const html=await res!.text();
-  assert.match(html,/Pairing challenge ID/);
-  assert.match(html,/Approve this device/);
+  assert.match(html,/Connect your device/);
+  assert.match(html,/Advanced: enter pairing details manually/);
+  assert.match(html,/assets\/pairing-review\.js/);
+  assert.match(res!.headers.get("content-security-policy")??"",/script-src 'self'/);
+  assert.match(html,/Approve device/);
   assert.match(res!.headers.get("set-cookie")??"",/HttpOnly; SameSite=Strict/);
   assert.deepEqual(f.calls,[]);
 });
