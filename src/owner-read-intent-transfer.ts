@@ -76,13 +76,18 @@ export function createSignedOwnerIntentDelivery(
       const req=httpsRequest({
         hostname:target.hostname,
         port:target.port||443,
+        // Total wall-clock deadline, not only socket inactivity: a slow
+        // streaming peer cannot hold the Cloud prepare request open.
         path:INTAKE_PATH,method:"POST",timeout:2_500,
+        signal:AbortSignal.timeout(2_500),
         ...(ca?{ca}:{}),
         headers:{Host:target.host,"Content-Type":"application/json",
           "Content-Length":Buffer.byteLength(body)}
       },res=>{
         // Never follow redirects or trust response-provided URL.
         res.resume();
+        res.on("error",()=>resolve(null));
+        res.on("aborted",()=>resolve(null));
         res.on("end",()=>resolve(res.statusCode===204?
           authorityOrigin+"/owner-read/review?requestId="+intent.requestId:null));
       });

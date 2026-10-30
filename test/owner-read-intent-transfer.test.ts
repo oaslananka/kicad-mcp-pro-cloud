@@ -66,9 +66,22 @@ test("Cloud Ed25519 intent transfer is HTTPS-only, authenticated, exact and one-
         "-subj","/CN=localhost","-addext","subjectAltName=DNS:localhost"
       ],{stdio:"ignore"});
       let intake:ReturnType<typeof createVerifiedOwnerIntentIntake>|undefined;
+      let slowResponse=false;
+      let slowResponseClosed=false;
       server=createServer({
         key:await readFile(keyPath),cert:await readFile(certPath)
       },(req,res)=>{
+        if(slowResponse){
+          req.resume();
+          res.writeHead(200,{"Content-Type":"text/plain"});
+          res.write("processing");
+          const drip=setInterval(()=>{if(!res.destroyed)res.write(".");},250);
+          const end=setTimeout(()=>{if(!res.destroyed)res.end();},5_500);
+          res.on("close",()=>{
+            clearInterval(drip);clearTimeout(end);slowResponseClosed=true;
+          });
+          return;
+        }
         void (intake?.(req,res)??Promise.reject(Error("No trusted intake"))).catch(()=>{
           if(!res.headersSent)res.writeHead(403);
           res.end();
@@ -166,6 +179,19 @@ test("Cloud Ed25519 intent transfer is HTTPS-only, authenticated, exact and one-
       assert.equal(duplicate.filter(Boolean).length,1,
         "Concurrent signed delivery cannot register multiple review intents");
       assert.equal(accepted.size,3);
+      // A peer can drip response bytes faster than an idle socket timeout.
+      // Issuance must still fail closed within a fixed overall deadline.
+      slowResponse=true;
+      const started=Date.now();
+      assert.equal(await deliver(intent()),null);
+      assert.ok(Date.now()-started<4_500,
+        "Slow-drip owner authority must not hold Cloud prepare indefinitely");
+      for(let i=0;i<20&&!slowResponseClosed;i++){
+        await new Promise(resolve=>setTimeout(resolve,25));
+      }
+      assert.equal(slowResponseClosed,true,
+        "Expired transfer must close the stalled HTTPS response");
+      slowResponse=false;
       assert.throws(()=>createSignedOwnerIntentDelivery(
         "http://localhost",cloud,signingKey,cert),/HTTPS/);
       assert.throws(()=>createVerifiedOwnerIntentIntake(
