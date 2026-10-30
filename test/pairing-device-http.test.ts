@@ -94,6 +94,12 @@ test("strict device-only HTTP denies browser, spoofed identity and oversized tra
     const received=await response.json() as Record<string,unknown>;
     assert.equal(received.challengeId,id);
     assert.equal(received.deviceCode,secret);
+    const complete=new URL(String(received.verificationUriComplete));
+    assert.equal(complete.pathname,"/devices/pairing");
+    assert.equal(complete.search,"");
+    assert.equal(new URLSearchParams(complete.hash.slice(1)).get("challenge"),id);
+    assert.equal(new URLSearchParams(complete.hash.slice(1)).get("code"),"ABCDEF-123456");
+    assert.ok(!String(received.verificationUriComplete).includes(secret));
     assert.deepEqual(calls,["issue:127.0.0.1:KiCad Test"]);
     const redeem=await fetch(l.origin+"/api/v1/pairing/device/redeem",{
       method:"POST",headers:{"Content-Type":"application/json"},

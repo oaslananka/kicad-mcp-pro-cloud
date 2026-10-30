@@ -43,6 +43,10 @@ h3{font-size:16px;line-height:1.35;font-weight:670;letter-spacing:-.02em;margin:
 .button:hover{background:#304960;border-color:#7394b8;transform:translateY(-1px)}.button.primary{background:#b4d4ff;border-color:#b4d4ff;color:#15253a;box-shadow:0 3px 20px rgba(123,176,246,.1)}
 .button.primary:hover{background:#d5e6ff;border-color:#d5e6ff}.button.secondary{background:#243449}.button.disabled{color:#a0afc0;background:#252d38;cursor:not-allowed;opacity:.8}
 .button.reject{background:#1d2937}.button.danger{background:#37272f;color:#ffd0c9;border-color:#795761}.button.danger:hover{background:#50313c}
+[hidden]{display:none!important}
+#pairing-manual{margin-top:18px;border-top:1px solid var(--line);padding-top:14px}
+#pairing-manual summary{cursor:pointer;color:var(--muted);font-size:12px;margin-bottom:12px}
+.pairing-code{display:inline-block;letter-spacing:.09em;font-family:ui-monospace,monospace;font-size:15px;color:var(--blue)}
 .action-row,.form-actions{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin-top:26px}
 .landing-panel{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(365px,.92fr);gap:0;overflow:hidden;padding:0;box-shadow:var(--shadow);background:#121b28}
 .landing-intro{padding:55px 47px 40px;background:radial-gradient(ellipse at 9% 3%,rgba(93,143,211,.105),transparent 57%),#131d29}
