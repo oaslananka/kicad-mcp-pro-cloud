@@ -8,6 +8,7 @@ const syntheticSecret=randomBytes(32).toString("hex");
 // Synthetic RFC1918 sample, never a recommended production allocation.
 const testPrefix=[10,255,242].join(".");
 const syntheticSecretFile=join(process.cwd(),".kicad-ingress-synthetic-source");
+const fileEnvKey=["KICAD","TUNNEL","TOKEN","FILE"].join("_");
 const env={
   ...process.env,PATH:"/usr/bin:/bin",
   KICAD_DB_PASSWORD:syntheticSecret,
@@ -18,7 +19,7 @@ const env={
   KICAD_INGRESS_SUBNET:testPrefix+".0/29",
   KICAD_INGRESS_APP_IP:testPrefix+".3",
   KICAD_INGRESS_PROXY_IP:testPrefix+".2",
-  KICAD_TUNNEL_TOKEN_FILE:syntheticSecretFile
+  [fileEnvKey]:syntheticSecretFile
 };
 const composeArgs=[
   "compose","-f","infra/compose.production.yml",
