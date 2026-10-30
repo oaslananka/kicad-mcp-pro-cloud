@@ -1,4 +1,5 @@
 import {renderPage} from "./ui-shell.js";
+import {Icon} from "./ui-icons.js";
 import type {ManagedDevice} from "./device-management.js";
 export function renderDevicesPage(devices:ReadonlyArray<ManagedDevice & {csrf:string}>,notice?:string,enrollmentAvailable=true):string {
   return renderPage({title:"Devices",kind:"devices",eyebrow:"Workspace / Devices",
@@ -15,7 +16,7 @@ export function renderDevicesPage(devices:ReadonlyArray<ManagedDevice & {csrf:st
       </div></div>:
         <><div className="card-kicker">ENROLLED DEVICES</div>
           <h2>{devices.length===1?"1 enrolled device":`${devices.length} enrolled devices`}</h2>
-          {devices.length===0?<div className="empty-state"><div className="empty-icon" aria-hidden="true">▤</div><div>
+          {devices.length===0?<div className="empty-state"><div className="empty-icon"><Icon name="devices" size={21}/></div><div>
             <h3>No enrolled devices</h3><p>No devices are currently registered to this account.</p>
           </div></div>:
             <ul className="connections-list">{devices.map(d=><li className="connection-item" key={d.id}>
@@ -27,7 +28,7 @@ export function renderDevicesPage(devices:ReadonlyArray<ManagedDevice & {csrf:st
                   <button className="button danger" type="submit">Revoke device</button>
                 </form>}
             </li>)}</ul>}
-          <div className="security-note">Revoked keys cannot authenticate, even if a device flag is later changed. No KiCad project files or paths are stored in Cloud.</div>
+          <div className="security-note"><Icon name="shield" size={17}/> Revoked keys cannot authenticate, even if a device flag is later changed. No KiCad project files or paths are stored in Cloud.</div>
           {enrollmentAvailable?<div className="action-row"><a className="button secondary" href="/devices/pairing">Review device pairing →</a></div>:null}
         </>}
     </section></div>

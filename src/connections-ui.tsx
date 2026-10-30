@@ -1,4 +1,5 @@
 import {renderPage} from "./ui-shell.js";
+import {Icon} from "./ui-icons.js";
 export type DisplayConnection={id:string;name:string;scopes:string[];clientId:string;csrf:string};
 const scopesInfo:Record<string,string>={
   "openid":"Identify your account",
@@ -13,7 +14,7 @@ export function renderConnectionsPage(connections:DisplayConnection[],notice?:st
       <div className="card-kicker">AUTHORIZED APPLICATIONS</div>
       <h2 id="connected-clients">{connections.length===1?"1 connected app":`${connections.length} connected apps`}</h2>
       {notice?<output className="output-notice">{notice}</output>:null}
-      {connections.length===0?<div className="empty-state"><div className="empty-icon" aria-hidden="true">⟷</div><div>
+      {connections.length===0?<div className="empty-state"><div className="empty-icon"><Icon name="connections" size={21}/></div><div>
         <h3>No AI apps connected yet</h3><p>Start a connection from your AI client and review the permission request here.</p>
       </div></div>:
         <ul className="connections-list">{connections.map(c=><li className="connection-item" key={c.id}>
@@ -29,7 +30,7 @@ export function renderConnectionsPage(connections:DisplayConnection[],notice?:st
             <button className="button danger" type="submit">Remove access</button>
           </form>
         </li>)}</ul>}
-      <div className="security-note">Removing access disables the app's project grants. Previously issued tokens may persist until expiry, but revoked grants prevent project discovery.</div>
+      <div className="security-note"><Icon name="shield" size={17}/> Removing access disables the app's project grants. Previously issued tokens may persist until expiry, but revoked grants prevent project discovery.</div>
     </section><section className="card detail-card"><div className="card-kicker">PERMISSIONS</div>
       <h2>How access is controlled</h2><p>Signing in authorizes your account. Access to an individual KiCad project requires an additional explicit grant and a supported device connection.</p>
     </section></div>});
