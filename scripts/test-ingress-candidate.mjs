@@ -87,6 +87,12 @@ const scenarios=[
   ["WebSocket API enabled before acceptance",m=>{
     m.services.app.environment.CONNECTOR_WS_ENABLED="true";
   }],
+  ["local one-shot tool enabled before acceptance",m=>{
+    m.services.app.environment.CONNECTOR_OPERATOR_ONESHOT_ENABLED="true";
+  }],
+  ["ingress trusted IP is set before acceptance",m=>{
+    m.services.app.environment.TRUSTED_CLOUDFLARED_PEERS="172.18.0.9";
+  }],
   ["persistent database volume replaced",m=>{
     m.services.db.volumes=[];
   }]
