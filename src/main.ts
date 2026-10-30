@@ -5,6 +5,7 @@ import {PgConnectorSessions} from "./connector-session.js";
 import {PgConnectorReadGate} from "./connector-read-gate.js";
 import {BoundConnectorConnections} from "./connector-transport-binding.js";
 import {attachConnectorWebSocket} from "./connector-ws.js";
+import {openOwnerConsentRuntime} from "./owner-read-consumer-runtime.js";
 import {PgDeviceManagement} from "./device-management.js";
 import {PgPairingReview} from "./pairing-review.js";
 import {PgPairingDeviceAPI} from "./pairing-device-api.js";
@@ -24,10 +25,23 @@ if(wsEnabled&&!config.publicOrigin.startsWith("https://")){
   throw new Error("Connector WebSocket requires externally terminated HTTPS");
 }
 const connectorPool=(wsEnabled||Boolean(identity))?new Pool({connectionString:config.databaseUrl}):null;
+// Explicitly independent PostgreSQL role; never issue owner approvals here.
+// With the default flag OFF, reads remain disabled even if WSS is enabled.
+const ownerConsentRuntime=await openOwnerConsentRuntime(
+  process.env,config.publicOrigin,wsEnabled,connectorPool);
 const deviceManagement=identity&&connectorPool?new PgDeviceManagement(connectorPool):undefined;
 const pairingReview=identity&&connectorPool?
   new PgPairingReview(connectorPool,process.env.BETTER_AUTH_SECRET??""):undefined;
 const pairingDeviceEnabled=process.env.PAIRING_DEVICE_API_ENABLED==="true";
+// No additional issuer, OAuth App or domain for the optional presence-only
+// pilot. It is deliberately OFF unless the owner explicitly opts in.
+// Local user presence is weaker than independent WebAuthn and must never
+// authorize native commands or return files.
+const operatorLocalOnce=process.env.CONNECTOR_OPERATOR_ONESHOT_ENABLED==="true";
+if(operatorLocalOnce&&(!wsEnabled||!pairingDeviceEnabled||!identity||
+    ownerConsentRuntime||process.env.OWNER_READ_CONSUMER_ENABLED==="true")){
+  throw Error("Local one-shot pilot needs built-in identity, pairing and WS only");
+}
 if(pairingDeviceEnabled&&(!identity||!config.publicOrigin.startsWith("https://"))){
   throw new Error("Device pairing API requires built-in identity and trusted HTTPS ingress");
 }
@@ -40,16 +54,21 @@ const pairingDevice=pairingDeviceEnabled&&connectorPool?
 // existing fail-closed Cloudflare source policy.
 const deviceSource=(wsEnabled||pairingDeviceEnabled)?
   configuredDeviceSource(process.env):undefined;
-const server=createHttpServer(config,inventory,createVerifier(config),inventory,
-  identity,deviceManagement,pairingReview,pairingDevice,deviceSource);
+// Lazy binding keeps all read surfaces absent when connector WS is disabled.
+let connectorRelay:ReturnType<typeof attachConnectorWebSocket>|null=null;
+const server=createHttpServer(config, inventory, createVerifier(config), {grants:inventory, identity:identity, devices:deviceManagement, pairings:pairingReview, pairingDevice:pairingDevice, deviceSource:deviceSource,
+  mcpProjectPresenceEnabled:operatorLocalOnce,summaryRelay:()=>connectorRelay});
 const connectorWs=wsEnabled&&connectorPool?attachConnectorWebSocket(server,{
   publicOrigin:config.publicOrigin,
   sourceOf:deviceSource!,
   proofs:new PgDeviceHandshakes(connectorPool),
+  ...(ownerConsentRuntime?{ownerConsent:ownerConsentRuntime.consent}:{}),
+  operatorLocalOnce,
   connections:new BoundConnectorConnections(
     new PgConnectorSessions(connectorPool),
     new PgConnectorReadGate(connectorPool))
 }):null;
+connectorRelay=connectorWs;
 server.listen(config.port, config.host, () => {
   // Never log credential-bearing URLs, project data or request bodies.
   process.stdout.write("Cloud MCP server listening on configured interface\n");
@@ -58,6 +77,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     void (async()=>{
       await connectorWs?.close();
+      await ownerConsentRuntime?.close();
       await new Promise<void>(resolve=>server.close(()=>resolve()));
       await connectorPool?.end();
       await inventory.close();

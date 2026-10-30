@@ -128,3 +128,19 @@ test("token enrollment only runs with an interactive terminal",()=>{
   assert.match(result.stderr,/Interactive owner TTY required/);
   assert.doesNotMatch(result.stderr,/synthetic-token-do-not-use/);
 });
+
+test("protected production watcher keeps selected ingress across deploy and rollback",()=>{
+  const validate=(mode)=>spawnSync("/usr/bin/bash",["-c",
+    "set -euo pipefail; source scripts/production-compose-files.sh; select_production_compose_files; printf '%s\\n' \"${production_compose_files[@]}\""],
+    {cwd:root,env:{...base,KICAD_CLOUD_PRODUCTION_INGRESS:mode},encoding:"utf8"});
+  const shared=validate("shared");
+  assert.equal(shared.status,0,shared.stderr);
+  assert.deepEqual(shared.stdout.trim().split("\n"),
+    ["-f","infra/compose.production.yml"]);
+  const isolated=validate("isolated");
+  assert.equal(isolated.status,0,isolated.stderr);
+  assert.deepEqual(isolated.stdout.trim().split("\n"),
+    ["-f","infra/compose.production.yml","-f","infra/compose.isolated-ingress.candidate.yml"]);
+  const invalid=validate("unreviewed");
+  assert.notEqual(invalid.status,0);
+});

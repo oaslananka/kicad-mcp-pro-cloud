@@ -6,9 +6,12 @@ export function assertIngressCandidate(model,env,raw){
   assert.equal(model.name,"kicad-cloud");
   assert.equal(model.services.app.image,"kicad-mcp-pro-cloud:production");
   assert.equal(model.services.app.environment.AUTH_MODE,"external");
-  assert.equal(model.services.app.environment.PAIRING_DEVICE_API_ENABLED,undefined);
-  assert.equal(model.services.app.environment.CONNECTOR_WS_ENABLED,undefined);
-  assert.equal(model.services.app.environment.TRUSTED_CLOUDFLARED_PEERS,undefined);
+  // New Compose passes disabled defaults explicitly. Either absent (older
+  // fixtures) or "false" is safe; "true" remains a forbidden activation.
+  assert.equal(model.services.app.environment.PAIRING_DEVICE_API_ENABLED ?? "false","false");
+  assert.equal(model.services.app.environment.CONNECTOR_WS_ENABLED ?? "false","false");
+  assert.equal(model.services.app.environment.CONNECTOR_OPERATOR_ONESHOT_ENABLED ?? "false","false");
+  assert.equal(model.services.app.environment.TRUSTED_CLOUDFLARED_PEERS ?? "","");
   assert.deepEqual(Object.keys(model.services.app.networks).sort((a,b)=>a.localeCompare(b)),
     ["database","ingress_private"]);
   assert.deepEqual(Object.keys(model.services.cloudflared_kicad.networks).sort((a,b)=>a.localeCompare(b)),
@@ -38,7 +41,7 @@ export function assertIngressCandidate(model,env,raw){
   assert.ok(!model.services.cloudflared_kicad.command.includes("--token"));
   assert.deepEqual(model.services.cloudflared_kicad.secrets.map(x=>x.source),
     ["kicad_tunnel_token"]);
-  assert.equal(model.secrets.kicad_tunnel_token.environment,"KICAD_CLOUDFLARE_TUNNEL_TOKEN");
+  assert.equal(model.secrets.kicad_tunnel_token.file,env.KICAD_TUNNEL_TOKEN_FILE);
   assert.equal(model.services.db.volumes[0].type,"volume");
   assert.equal(model.services.db.volumes[0].target,"/var/lib/postgresql/data");
   assert.ok(!raw.includes("KICAD_CLOUDFLARE_TUNNEL_TOKEN="),

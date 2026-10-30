@@ -42,6 +42,12 @@ services:
       NODE_ENV: production
       MANAGEMENT_CLIENT_ID: ${MANAGEMENT_CLIENT_ID:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      # Pilot remains OFF without explicit approved runtime opt-in.
+      CONNECTOR_WS_ENABLED: ${CONNECTOR_WS_ENABLED:-false}
+      PAIRING_DEVICE_API_ENABLED: ${PAIRING_DEVICE_API_ENABLED:-false}
+      CONNECTOR_OPERATOR_ONESHOT_ENABLED: ${CONNECTOR_OPERATOR_ONESHOT_ENABLED:-false}
+      CONNECTOR_INGRESS_MODE: ${CONNECTOR_INGRESS_MODE:-cloudflare}
+      TRUSTED_CLOUDFLARED_PEERS: ${TRUSTED_CLOUDFLARED_PEERS:-}
     networks:
       - database
       - tunnel

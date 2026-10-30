@@ -33,9 +33,10 @@ services:
       connector_egress: {}
 secrets:
   kicad_tunnel_token:
-    # Inject from the dedicated Doppler value in the future *only* during
-    # operator-reviewed rollout. Never inline or log the token.
-    environment: KICAD_CLOUDFLARE_TUNNEL_TOKEN
+    # Docker Compose read-only services require a file-backed secret source.
+    # Materialize the dedicated Doppler value into a private tmpfs file before
+    # starting the connector; never put the token in env/args/logs/Compose.
+    file: ${KICAD_TUNNEL_TOKEN_FILE:?Approved private runtime secret file}
 networks:
   # Clear the original shared network instead of keeping an unused
   # external network declaration in the merged project model.

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
+import {join} from "node:path";
 import {assertIngressCandidate} from "./ingress-candidate-contract.mjs";
 
 // Synthetic RFC1918 sample, never a recommended production allocation.
@@ -7,7 +8,8 @@ const testPrefix=[10,255,242].join(".");
 const env={
   KICAD_INGRESS_APP_IP:testPrefix+".3",
   KICAD_INGRESS_PROXY_IP:testPrefix+".2",
-  KICAD_INGRESS_SUBNET:testPrefix+".0/29"
+  KICAD_INGRESS_SUBNET:testPrefix+".0/29",
+  KICAD_TUNNEL_TOKEN_FILE:join(process.cwd(),".kicad-ingress-test-source")
 };
 function valid(){
   return {
@@ -37,7 +39,7 @@ function valid(){
       ingress_private:{internal:true,ipam:{config:[{subnet:env.KICAD_INGRESS_SUBNET}]}},
       connector_egress:{internal:false}
     },
-    secrets:{kicad_tunnel_token:{environment:"KICAD_CLOUDFLARE_TUNNEL_TOKEN"}}
+    secrets:{kicad_tunnel_token:{file:env.KICAD_TUNNEL_TOKEN_FILE}}
   };
 }
 test("a clean, private KiCad-only ingress model satisfies the offline contract",()=>{
@@ -75,8 +77,8 @@ const scenarios=[
   ["connector token inserted in the command",m=>{
     m.services.cloudflared_kicad.command=["tunnel","run","--token","secret"];
   }],
-  ["connector secret comes from a different variable",m=>{
-    m.secrets.kicad_tunnel_token.environment="SHARED_TUNNEL_TOKEN";
+  ["connector secret comes from an unapproved file",m=>{
+    m.secrets.kicad_tunnel_token.file=join(process.cwd(),".unapproved-ingress-source");
   }],
   ["OAuth mode silently changes",m=>{
     m.services.app.environment.AUTH_MODE="builtin";
@@ -86,6 +88,12 @@ const scenarios=[
   }],
   ["WebSocket API enabled before acceptance",m=>{
     m.services.app.environment.CONNECTOR_WS_ENABLED="true";
+  }],
+  ["local one-shot tool enabled before acceptance",m=>{
+    m.services.app.environment.CONNECTOR_OPERATOR_ONESHOT_ENABLED="true";
+  }],
+  ["ingress trusted IP is set before acceptance",m=>{
+    m.services.app.environment.TRUSTED_CLOUDFLARED_PEERS="172.18.0.9";
   }],
   ["persistent database volume replaced",m=>{
     m.services.db.volumes=[];

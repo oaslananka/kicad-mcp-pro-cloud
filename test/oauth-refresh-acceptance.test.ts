@@ -57,7 +57,7 @@ test("real OAuth refresh grant: rotation, revoked predecessor/successor, other o
       audience:origin+"/mcp",databaseUrl:scoped,
       allowedOrigins:[],managementClientId:"portal-client"
     };
-    httpServer=createHttpServer(config,grantStore,async()=>{throw new Error("unexpected auth")},grantStore,identity);
+    httpServer=createHttpServer(config, grantStore, async()=>{throw new Error("unexpected auth")}, {grants:grantStore, identity:identity});
     await new Promise<void>(resolve=>httpServer!.listen(0,"127.0.0.1",resolve));
     const httpEndpoint="http://127.0.0.1:"+(httpServer.address() as AddressInfo).port;
     const refresh=async (token:string,client:string) => {

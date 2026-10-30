@@ -84,8 +84,7 @@ test("HTTP challenge refuses absent/forged Cloudflare origin even with correct b
     enroll:async()=>({kind:"unavailable"})
   };
   const allowed=trustedCloudflareSource("127.0.0.1");
-  const server=createHttpServer(config,inventory,async()=>{throw Error("unused");},
-    undefined,undefined,undefined,undefined,api,allowed);
+  const server=createHttpServer(config, inventory, async()=>{throw Error("unused");}, {pairingDevice:api, deviceSource:allowed});
   const l=await listen(server);
   const der=generateKeyPairSync("ed25519").publicKey.export({
     format:"der",type:"spki"
@@ -105,8 +104,7 @@ test("HTTP challenge refuses absent/forged Cloudflare origin even with correct b
   }finally{await l.close();}
 
   const denied=trustedCloudflareSource("127.0.0.2");
-  const deniedServer=createHttpServer(config,inventory,async()=>{throw Error("unused");},
-    undefined,undefined,undefined,undefined,api,denied);
+  const deniedServer=createHttpServer(config, inventory, async()=>{throw Error("unused");}, {pairingDevice:api, deviceSource:denied});
   const dl=await listen(deniedServer);
   try{
     const res=await fetch(dl.base+"/api/v1/pairing/device/challenge",{
@@ -180,8 +178,7 @@ test("private SSH source is enforced by pairing HTTP even without CF headers",as
   const resolver=trustedPrivateSshSource("172.21.0.1");
   const der=generateKeyPairSync("ed25519").publicKey.export({format:"der",type:"spki"}) as Buffer;
   const body=JSON.stringify({alias:"Owner device",publicKeyDer:der.toString("base64")});
-  const server=createHttpServer(config,inventory,async()=>{throw Error("unused");},
-    undefined,undefined,undefined,undefined,api,resolver);
+  const server=createHttpServer(config, inventory, async()=>{throw Error("unused");}, {pairingDevice:api, deviceSource:resolver});
   const running=await listen(server);
   try{
     const response=await fetch(running.base+"/api/v1/pairing/device/challenge",{

@@ -3,6 +3,7 @@ import {generateKeyPairSync,randomBytes,sign} from "node:crypto";
 import {createServer} from "node:http";
 import type {AddressInfo} from "node:net";
 import {test} from "node:test";
+import type {Pool} from "pg";
 import {WebSocket} from "ws";
 import {inIsolatedDatabase} from "./isolated-db.js";
 import {PgPairingChallenges} from "../src/pairing-store.js";
@@ -60,6 +61,44 @@ function field(obj:Record<string,unknown>,key:string):string{
   return obj[key] as string;
 }
 
+async function startFixtureServer(db:Pool,operatorLocalOnce=false){
+  const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
+  await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+  const port=(server.address() as AddressInfo).port;
+  const attached=attachConnectorWebSocket(server,{
+    publicOrigin:"http://127.0.0.1:"+port,
+    sourceOf:()=>"127.0.0.1",
+    proofs:new PgDeviceHandshakes(db),
+    ...(operatorLocalOnce?{operatorLocalOnce:true}:
+      {ownerConsent:{consume:async()=>true}}), // Synthetic, not human approval.
+    connections:new BoundConnectorConnections(
+      new PgConnectorSessions(db),new PgConnectorReadGate(db))
+  });
+  return {server,port,attached};
+}
+
+test("local one-shot cannot silently bypass a configured independent owner approval",
+  {skip:!url,timeout:30_000},async()=>{
+  await inIsolatedDatabase(url!,migrations,async db=>{
+    const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
+    await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+    try{
+      const port=(server.address() as AddressInfo).port;
+      assert.throws(()=>attachConnectorWebSocket(server,{
+        publicOrigin:"http://127.0.0.1:"+port,
+        sourceOf:()=>"127.0.0.1",
+        proofs:new PgDeviceHandshakes(db),
+        connections:new BoundConnectorConnections(
+          new PgConnectorSessions(db),new PgConnectorReadGate(db)),
+        ownerConsent:{consume:async()=>false},
+        operatorLocalOnce:true
+      }),/Conflicting owner approval modes/);
+    }finally{
+      await new Promise<void>(resolve=>server.close(()=>resolve()));
+    }
+  });
+});
+
 test("outbound local WebSocket proves enrolled device identity then binds signed session",
   {skip:!url,timeout:60_000},async()=>{
   await inIsolatedDatabase(url!,migrations,async db=>{
@@ -76,17 +115,7 @@ test("outbound local WebSocket proves enrolled device identity then binds signed
     const device=enrolled.deviceId;
     // Only a fixture. No public enablement endpoint exists.
     await db.query("UPDATE devices SET enabled=true WHERE id=$1",[device]);
-    const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
-    await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
-    const port=(server.address() as AddressInfo).port;
-    const origin="http://127.0.0.1:"+port;
-    const attached=attachConnectorWebSocket(server,{
-      publicOrigin:origin,
-      sourceOf:()=> "127.0.0.1",
-      proofs:new PgDeviceHandshakes(db),
-      connections:new BoundConnectorConnections(
-        new PgConnectorSessions(db),new PgConnectorReadGate(db))
-    });
+    const {server,port,attached}=await startFixtureServer(db);
     let ws:WebSocket|undefined;
     try{
       // Browser-origin and query-string upgrade attempts must fail.
@@ -145,16 +174,7 @@ test("invalid device signature never starts an authenticated connector session",
     assert.equal(enrolled.kind,"enrolled");
     if(enrolled.kind!=="enrolled")return;
     await db.query("UPDATE devices SET enabled=true WHERE id=$1",[enrolled.deviceId]);
-    const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
-    await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
-    const port=(server.address() as AddressInfo).port;
-    const attached=attachConnectorWebSocket(server,{
-      publicOrigin:"http://127.0.0.1:"+port,
-      sourceOf:()=> "127.0.0.1",
-      proofs:new PgDeviceHandshakes(db),
-      connections:new BoundConnectorConnections(
-        new PgConnectorSessions(db),new PgConnectorReadGate(db))
-    });
+    const {server,port,attached}=await startFixtureServer(db);
     let ws:WebSocket|undefined;
     try{
       ws=await connect("ws://127.0.0.1:"+port+"/api/v1/connector/ws");
@@ -175,4 +195,128 @@ test("invalid device signature never starts an authenticated connector session",
       await new Promise<void>(resolve=>server.close(()=>resolve()));
     }
   });
+});
+
+test("authenticated Cloud socket rejects revocation and expired reads after wall-clock rollback",
+  {skip:!url,timeout:90_000},async()=>{
+  for(const revocation of ["none","local_once","grant","device","token","clock_rollback"] as const){
+    await inIsolatedDatabase(url!,migrations,async db=>{
+      const owner="summary-owner",clientId="approved-client";
+      const keys=generateKeyPairSync("ed25519");
+      const der=keys.publicKey.export({format:"der",type:"spki"}) as Buffer;
+      const pair=new PgPairingChallenges(db,randomBytes(32));
+      const pairing=await pair.issue("Summary test",der);
+      await pair.review(pairing.id,owner,pairing.userCode,"approve");
+      const enrolled=await pair.enroll(pairing.id,pairing.deviceCode,
+        sign(null,redemptionProof(pairing.id,pairing.deviceCode),keys.privateKey));
+      assert.equal(enrolled.kind,"enrolled");
+      if(enrolled.kind!=="enrolled")return;
+      const device=enrolled.deviceId;
+      const project="77777777-7777-4777-8777-777777777777";
+      await db.query("UPDATE devices SET enabled=true WHERE id=$1",[device]);
+      await db.query("INSERT INTO projects(id,owner_sub,device_id,alias,enabled,max_mode) "+
+        "VALUES($1,$2,$3,'Fixture',true,'readonly')",[project,owner,device]);
+      await db.query("INSERT INTO project_client_grants(project_id,owner_sub,client_id,enabled,max_mode) "+
+        "VALUES($1,$2,$3,true,'readonly')",[project,owner,clientId]);
+      const {server,port,attached}=await startFixtureServer(
+        db,revocation==="local_once");
+      let ws:WebSocket|undefined;
+      const actualDateNow=Date.now;
+      try{
+        ws=await connect("ws://127.0.0.1:"+port+"/api/v1/connector/ws");
+        const challenge=await send(ws,{kind:"device.hello",version:1,
+          ownerSub:owner,deviceId:device});
+        const signed=sign(null,deviceHandshakeProof(field(challenge,"challengeId"),
+          device,field(challenge,"nonce")),keys.privateKey).toString("base64url");
+        const session=await send(ws,{kind:"device.proof",version:1,signature:signed});
+        const signature=sign(null,connectorSessionProof(field(session,"sessionId"),
+          field(session,"challengeId"),device,field(session,"nonce"),
+          field(session,"binding")),keys.privateKey).toString("base64url");
+        const ready=await send(ws,{kind:"connector.session_proof",version:1,signature});
+        assert.equal(ready.kind,"connector.ready");
+        const oauth={ownerSub:owner,clientId,accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)};
+        // First publish a precise server-issued intent for the human
+        // approval ceremony. Nothing is sent to the device yet.
+        let prepared=attached.prepareOwnerSummary(oauth,device,project);
+        assert.ok(prepared,"Ready device can reserve a one-use owner intent");
+        assert.equal(prepared.operation,"project_summary");
+        assert.equal(prepared.ownerSub,owner);
+        assert.equal(prepared.clientId,clientId);
+        assert.equal(prepared.deviceId,device);
+        assert.equal(prepared.projectId,project);
+        assert.equal(attached.prepareOwnerSummary(oauth,device,project),null,
+          "Only one outstanding intent per socket is allowed");
+        assert.equal(await attached.requestSummary(oauth,device,project),null,
+          "Legacy dispatch cannot bypass an unapproved reservation");
+        assert.equal(await attached.requestSummary(oauth,device,project,
+          {...prepared}),null,"A copied intent is not an authorization token");
+        if(revocation==="none"){
+          // An exact legitimate reservation cannot be rebound to another
+          // OAuth client; even the original reference is then burned.
+          assert.equal(await attached.requestSummary(
+            {...oauth,clientId:"untrusted-other-client"},device,project,prepared),
+            null,"Wrong OAuth client must not consume a signed owner intent");
+          assert.equal(await attached.requestSummary(oauth,device,project,prepared),
+            null,"Wrong-client attempt must permanently burn that intent");
+          const next=attached.prepareOwnerSummary(oauth,device,project);
+          assert.ok(next,"A fresh explicit owner decision needs a new intent");
+          assert.notEqual(next.requestId,prepared.requestId);
+          prepared=next;
+        }
+        const outbound=waitMessage(ws);
+        const pending=attached.requestSummary(oauth,device,project,prepared);
+        const frame=await outbound;
+        assert.equal(frame.kind,"connector.authorized_read");
+        assert.equal(frame.sequence,1);
+        const request=frame.request as Record<string,unknown>;
+        assert.equal(request.kind,"connector.read_request");
+        assert.equal(request.operation,"project_summary");
+        assert.equal(request.projectId,project);
+        assert.equal(request.requestId,prepared.requestId,
+          "WSS request must match exact reviewed owner intent");
+        assert.equal(await attached.requestSummary(oauth,device,project,prepared),
+          null,"Prepared owner intent is single-use");
+        if(revocation==="grant"){
+          await db.query("UPDATE project_client_grants SET enabled=false WHERE project_id=$1",
+            [project]);
+        }else if(revocation==="device"){
+          assert.equal(await pair.revokeDevice(owner,device),true);
+          assert.equal((await db.query<{state:string}>(
+            "SELECT state FROM connector_sessions WHERE device_id=$1",[device])
+          ).rows[0].state,"revoked");
+        }else if(revocation==="token"){
+          await db.query("INSERT INTO client_token_cutoffs(owner_sub,client_id,revoked_at) "+
+            "VALUES($1,$2,clock_timestamp())",[owner,clientId]);
+        }else if(revocation==="clock_rollback"){
+          // The wire deadline is 8 s. A host wall-clock rollback must not
+          // revive a read that took longer than the operator's grant.
+          await new Promise(resolve=>setTimeout(resolve,8_200));
+          Date.now=()=>actualDateNow()-30_000;
+        }
+        const reply={kind:"connector.local_read_preview",version:1,
+          requestId:request.requestId,projectId:project,operation:"project_summary",
+          files:{projectPresent:true,boardPresent:false,schematicPresent:true}};
+        const success=revocation==="none"||revocation==="local_once";
+        const ack=success ? waitMessage(ws) : null;
+        const close=success ? null : waitClose(ws);
+        ws.send(JSON.stringify({kind:"connector.read_result",version:1,
+          sequence:1,result:reply}));
+        const result=await pending;
+        if(!success){
+          assert.equal(result,null,"Must not return private project metadata after "+revocation);
+          assert.equal(await close,1008,"Must close the revoked socket without an ACK");
+        }else{
+          assert.deepEqual(result,reply);
+          const receipt=await ack!;
+          assert.equal(receipt.kind,"connector.read_ack");
+          assert.equal(receipt.requestId,request.requestId);
+        }
+      }finally{
+        Date.now=actualDateNow;
+        ws?.terminate();
+        await attached.close();
+        await new Promise<void>(resolve=>server.close(()=>resolve()));
+      }
+    });
+  }
 });

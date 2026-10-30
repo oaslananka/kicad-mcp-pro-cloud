@@ -46,6 +46,18 @@ git switch --detach --quiet "$target"
   echo 'Main advanced before building; let next cycle handle it'; exit 0;
 }
 
+# Preserve the accepted ingress network on every future deployment
+# and on rollback; never silently put an isolated app on ops_internal.
+source scripts/production-compose-files.sh
+select_production_compose_files
+current_isolated=$(docker inspect kicad-cloud-app-1   --format '{{if index .NetworkSettings.Networks "kicad_cloud_ingress_private"}}yes{{else}}no{{end}}')
+if [[ "$current_isolated" == yes && "${KICAD_CLOUD_PRODUCTION_INGRESS:-shared}" != isolated ]]; then
+  echo "Live Cloud uses isolated ingress but deploy mode is not isolated; refusing" >&2
+  exit 1
+fi
+# Validate before tagging or restarting any production image.
+scripts/doppler-runtime.sh docker compose "${production_compose_files[@]}" config -q
+
 old=$(docker image inspect kicad-mcp-pro-cloud:production --format '{{.Id}}')
 running=$(docker inspect kicad-cloud-app-1 --format '{{.Image}}')
 [[ "$old" == "$running" ]] || { echo 'Production tag and active container differ'; exit 1; }
@@ -59,12 +71,12 @@ restore() {
   echo 'Deployment verification failed. Restoring previous application image.' >&2
   docker image tag "$old" kicad-mcp-pro-cloud:production
   scripts/doppler-runtime.sh \
-    docker compose -f infra/compose.production.yml up -d --no-deps --force-recreate app
+    docker compose "${production_compose_files[@]}" up -d --no-deps --force-recreate app
 }
 docker image tag "$old" kicad-mcp-pro-cloud:rollback
 docker image tag kicad-mcp-pro-cloud:candidate kicad-mcp-pro-cloud:production
 if ! scripts/doppler-runtime.sh \
-  docker compose -f infra/compose.production.yml up -d --no-deps --force-recreate app; then
+  docker compose "${production_compose_files[@]}" up -d --no-deps --force-recreate app; then
   restore; exit 1
 fi
 healthy=false
