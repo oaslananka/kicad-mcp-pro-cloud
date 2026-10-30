@@ -7,7 +7,8 @@ const testPrefix=[10,255,242].join(".");
 const env={
   KICAD_INGRESS_APP_IP:testPrefix+".3",
   KICAD_INGRESS_PROXY_IP:testPrefix+".2",
-  KICAD_INGRESS_SUBNET:testPrefix+".0/29"
+  KICAD_INGRESS_SUBNET:testPrefix+".0/29",
+  KICAD_TUNNEL_TOKEN_FILE:"/tmp/kicad-cloud-offline-test-token"
 };
 function valid(){
   return {
@@ -37,7 +38,7 @@ function valid(){
       ingress_private:{internal:true,ipam:{config:[{subnet:env.KICAD_INGRESS_SUBNET}]}},
       connector_egress:{internal:false}
     },
-    secrets:{kicad_tunnel_token:{environment:"KICAD_CLOUDFLARE_TUNNEL_TOKEN"}}
+    secrets:{kicad_tunnel_token:{file:env.KICAD_TUNNEL_TOKEN_FILE}}
   };
 }
 test("a clean, private KiCad-only ingress model satisfies the offline contract",()=>{
@@ -75,8 +76,8 @@ const scenarios=[
   ["connector token inserted in the command",m=>{
     m.services.cloudflared_kicad.command=["tunnel","run","--token","secret"];
   }],
-  ["connector secret comes from a different variable",m=>{
-    m.secrets.kicad_tunnel_token.environment="SHARED_TUNNEL_TOKEN";
+  ["connector secret comes from an unapproved file",m=>{
+    m.secrets.kicad_tunnel_token.file="/tmp/unapproved-shared-token";
   }],
   ["OAuth mode silently changes",m=>{
     m.services.app.environment.AUTH_MODE="builtin";

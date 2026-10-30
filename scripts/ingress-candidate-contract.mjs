@@ -41,7 +41,7 @@ export function assertIngressCandidate(model,env,raw){
   assert.ok(!model.services.cloudflared_kicad.command.includes("--token"));
   assert.deepEqual(model.services.cloudflared_kicad.secrets.map(x=>x.source),
     ["kicad_tunnel_token"]);
-  assert.equal(model.secrets.kicad_tunnel_token.environment,"KICAD_CLOUDFLARE_TUNNEL_TOKEN");
+  assert.equal(model.secrets.kicad_tunnel_token.file,env.KICAD_TUNNEL_TOKEN_FILE);
   assert.equal(model.services.db.volumes[0].type,"volume");
   assert.equal(model.services.db.volumes[0].target,"/var/lib/postgresql/data");
   assert.ok(!raw.includes("KICAD_CLOUDFLARE_TUNNEL_TOKEN="),

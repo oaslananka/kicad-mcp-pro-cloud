@@ -31,10 +31,16 @@ disconnected or reconfigured as part of the KiCad change.
   with a separately provisioned token. Its ingress service target after
   acceptance is `http://app:8787`. Never reuse the shared Tunnel token:
   this could inherit other applications' ingress routes.
-- Consume the new token as a Docker Compose secret from the existing
-  authorized Doppler config `kicad-mcp-pro/prd_cloud`. Compose passes it as a
-  read-only file to `cloudflared tunnel run --token-file`. Never include
-  it in image layers, source, stdout, process arguments or PRs.
+- The dedicated Tunnel token stays in the existing authorized Doppler
+  config `kicad-mcp-pro/prd_cloud`. The Docker Compose implementation for
+  the read-only connector requires a file-backed secret source. The
+  operator must privately materialize the token into a restricted tmpfs
+  runtime file, set `KICAD_TUNNEL_TOKEN_FILE` to that file's absolute path,
+  and run Compose without exposing token contents in output, CLI arguments,
+  Docker environment, images, source or PRs. The file must remain available
+  for connector restarts. If the tmpfs file is lost on reboot, restore it
+  from Doppler before starting the connector. Do not switch public DNS until
+  restart/restore recovery has been demonstrated.
 - Do **not** enable built-in OAuth, pairing HTTP, WebSocket or any schema
   migration as part of this network-only candidate. Live DB currently
   reports versions 001–006; the connector control plane needs 007–012 later.
