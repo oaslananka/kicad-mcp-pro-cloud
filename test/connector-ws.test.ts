@@ -77,6 +77,28 @@ async function startFixtureServer(db:Pool,operatorLocalOnce=false){
   return {server,port,attached};
 }
 
+test("local one-shot cannot silently bypass a configured independent owner approval",
+  {skip:!url,timeout:30_000},async()=>{
+  await inIsolatedDatabase(url!,migrations,async db=>{
+    const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
+    await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+    try{
+      const port=(server.address() as AddressInfo).port;
+      assert.throws(()=>attachConnectorWebSocket(server,{
+        publicOrigin:"http://127.0.0.1:"+port,
+        sourceOf:()=>"127.0.0.1",
+        proofs:new PgDeviceHandshakes(db),
+        connections:new BoundConnectorConnections(
+          new PgConnectorSessions(db),new PgConnectorReadGate(db)),
+        ownerConsent:{consume:async()=>false},
+        operatorLocalOnce:true
+      }),/Conflicting owner approval modes/);
+    }finally{
+      await new Promise<void>(resolve=>server.close(()=>resolve()));
+    }
+  });
+});
+
 test("outbound local WebSocket proves enrolled device identity then binds signed session",
   {skip:!url,timeout:60_000},async()=>{
   await inIsolatedDatabase(url!,migrations,async db=>{

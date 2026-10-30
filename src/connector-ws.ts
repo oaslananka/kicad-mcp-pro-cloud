@@ -117,6 +117,10 @@ export function attachConnectorWebSocket(
     projectId:string)=>PreparedOwnerSummary|null;
   requestSummary:(oauth:TrustedOAuthReadIdentity,deviceId:string,
     projectId:string,prepared?:PreparedOwnerSummary)=>Promise<SummaryReadResult|null>}{
+  // Never let a lightweight pilot setting downgrade an independent owner
+  // approval dependency, even when used outside the production entrypoint.
+  if(options.operatorLocalOnce&&options.ownerConsent)
+    throw Error("Conflicting owner approval modes");
   const wss=new WebSocketServer({noServer:true,perMessageDeflate:false,
     maxPayload:1024,clientTracking:true});
   const sockets=new Set<WebSocket>();
