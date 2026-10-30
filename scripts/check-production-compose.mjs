@@ -24,11 +24,9 @@ const config=JSON.parse(json);
 assert.deepEqual(Object.keys(config.services).sort((a,b)=>a.localeCompare(b)),["app","db"]);
 assert.equal(config.services.app.image,"kicad-mcp-pro-cloud:production");
 assert.equal(config.services.app.environment.AUTH_MODE,"external");
-for (const key of ["CONNECTOR_WS_ENABLED","PAIRING_DEVICE_API_ENABLED",
-                   "CONNECTOR_OPERATOR_ONESHOT_ENABLED"]) {
-  assert.equal(config.services.app.environment[key],"false",
-    key+" must remain disabled by default");
-}
+assert.equal(config.services.app.environment.CONNECTOR_WS_ENABLED,"false");
+assert.equal(config.services.app.environment.PAIRING_DEVICE_API_ENABLED,"false");
+assert.equal(config.services.app.environment.CONNECTOR_OPERATOR_ONESHOT_ENABLED,"false");
 assert.equal(config.services.app.environment.CONNECTOR_INGRESS_MODE,"cloudflare");
 assert.equal(config.services.app.environment.TRUSTED_CLOUDFLARED_PEERS,"");
 assert.equal(config.services.app.environment.GITHUB_CLIENT_ID,"");
@@ -62,10 +60,9 @@ const pilotEnv={
 const pilot=JSON.parse(execFileSync("/usr/bin/docker",
   ["compose","-f","infra/compose.production.yml","config","--format","json"],
   {env:pilotEnv,encoding:"utf8"}));
-for(const flag of ["CONNECTOR_WS_ENABLED","PAIRING_DEVICE_API_ENABLED",
-                   "CONNECTOR_OPERATOR_ONESHOT_ENABLED"]) {
-  assert.equal(pilot.services.app.environment[flag],"true");
-}
+assert.equal(pilot.services.app.environment.CONNECTOR_WS_ENABLED,"true");
+assert.equal(pilot.services.app.environment.PAIRING_DEVICE_API_ENABLED,"true");
+assert.equal(pilot.services.app.environment.CONNECTOR_OPERATOR_ONESHOT_ENABLED,"true");
 assert.equal(pilot.services.app.environment.TRUSTED_CLOUDFLARED_PEERS,
   pilotEnv.TRUSTED_CLOUDFLARED_PEERS);
 assert.equal(pilot.services.app.environment.AUTH_MODE,"builtin");
