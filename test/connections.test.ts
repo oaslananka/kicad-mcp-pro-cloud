@@ -66,6 +66,8 @@ test("connection list requires session and escapes untrusted client metadata",as
   assert.match(body,/projects:read/);
   assert.doesNotMatch(body,/consent-b/);
   assert.match(response!.headers.get("set-cookie")??"",/HttpOnly; SameSite=Strict/);
+  // HTML form navigations send Origin: null under no-referrer; strict Origin validation must remain intact.
+  assert.equal(response!.headers.get("Referrer-Policy"),"same-origin");
 });
 test("revoke disables project grants before deleting own OAuth consent",async()=>{
   const f=fixture();
