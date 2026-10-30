@@ -1,9 +1,10 @@
 import {renderPage} from "./ui-shell.js";
+import {Icon} from "./ui-icons.js";
 export function renderPairingReviewPage(csrf:string,notice?:string):string {
   return renderPage({title:"Approve a device.",kind:"devices",eyebrow:"DEVICE PAIRING",
     summary:"Only approve a device you physically control. Check its identifier and code on the local device.",
     children:<section className="card detail-card">
-      <div className="card-kicker">PENDING PAIRING REVIEW</div>
+      <div className="card-kicker"><Icon name="shield" size={15}/> PENDING PAIRING REVIEW</div>
       {notice?<output className="output-notice">{notice}</output>:null}
       <form action="/devices/pairing/review" method="post">
         <label>Pairing challenge ID
@@ -18,7 +19,7 @@ export function renderPairingReviewPage(csrf:string,notice?:string):string {
           <button className="button danger" name="decision" value="deny" type="submit">Deny pairing</button>
         </div>
       </form>
-      <div className="security-note">The code alone does not grant access. The device must also prove
+      <div className="security-note"><Icon name="lock" size={17}/> The code alone does not grant access. The device must also prove
         possession of its own Ed25519 private key. Enrolled devices remain disabled until separately authorized.
         Never approve an unexpected code.</div>
       <a className="mini-link" href="/devices">← Your devices</a>
