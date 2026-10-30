@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
+import {join} from "node:path";
 import {assertIngressCandidate} from "./ingress-candidate-contract.mjs";
 
 // Synthetic RFC1918 sample, never a recommended production allocation.
@@ -8,7 +9,7 @@ const env={
   KICAD_INGRESS_APP_IP:testPrefix+".3",
   KICAD_INGRESS_PROXY_IP:testPrefix+".2",
   KICAD_INGRESS_SUBNET:testPrefix+".0/29",
-  KICAD_TUNNEL_TOKEN_FILE:"/tmp/kicad-cloud-offline-test-token"
+  KICAD_TUNNEL_TOKEN_FILE:join(process.cwd(),".kicad-ingress-test-source")
 };
 function valid(){
   return {
@@ -77,7 +78,7 @@ const scenarios=[
     m.services.cloudflared_kicad.command=["tunnel","run","--token","secret"];
   }],
   ["connector secret comes from an unapproved file",m=>{
-    m.secrets.kicad_tunnel_token.file="/tmp/unapproved-shared-token";
+    m.secrets.kicad_tunnel_token.file=join(process.cwd(),".unapproved-ingress-source");
   }],
   ["OAuth mode silently changes",m=>{
     m.services.app.environment.AUTH_MODE="builtin";
