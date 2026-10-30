@@ -38,7 +38,7 @@ await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
 const base=`http://127.0.0.1:${server.address().port}`;
 const browser=await chromium.launch({headless:true,...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{})});
 try{
-  for(const [width,height] of [[1440,900],[768,960],[390,844]]){
+  for(const [width,height] of [[1440,900],[768,960],[390,844],[375,812],[320,720]]){
     const page=await browser.newPage({viewport:{width,height},deviceScaleFactor:1});
     for(const kind of pages.keys()){
       const response=await page.goto(`${base}/${kind}`,{waitUntil:"load"});
