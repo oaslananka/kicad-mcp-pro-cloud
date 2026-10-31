@@ -1,7 +1,7 @@
 import {randomUUID} from "node:crypto";
 import type {Pool,PoolClient} from "pg";
 import {PgDeviceManagement} from "./device-management.js";
-import {issuePairing,reviewPairing,redeemPairing,
+import {issuePairing,reviewPairing,redeemPairing,pairingApprovalState,
   type PairingRecord,type PairingStatus} from "./device-pairing.js";
 
 type Row={
@@ -116,6 +116,18 @@ export class PgPairingChallenges {
       await save(db,proof.record);
       return {kind:"enrolled",deviceId,ownerSub:proof.ownerSub,deviceFingerprint:r.deviceFingerprint};
     });
+  }
+
+  /** Read-only; no public state enumeration without 256-bit code AND private-key proof. */
+  async approved(id:string,code:string,signature:Buffer):Promise<boolean|null>{
+    if(!UUID.test(id))return null;
+    const rows=await this.pool.query<Row>(
+      "SELECT id,device_alias,device_public_key_der,device_fingerprint,"+
+      "user_code_mac,device_code_mac,expires_at,state,attempts,owner_sub "+
+      "FROM pairing_challenges WHERE id=$1",[id]);
+    const row=rows.rows[0];
+    return row?pairingApprovalState(convert(row),this.key,await clock(this.pool),
+      code,signature):null;
   }
 
   /** Shared transactional owner revocation implementation. */

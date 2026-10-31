@@ -27,7 +27,18 @@ No remote address supplied in HTTP headers is trusted.
    `/devices/pairing` page after authenticated owner login.
 2. An independent owner browser session and CSRF-protected action approve
    or deny the challenge. The code never authorizes enrollment by itself.
-3. `POST /api/v1/pairing/device/redeem` with
+3. Optional device-side status check: `POST /api/v1/pairing/device/status`
+   accepts `challengeId`, `deviceCode` and a distinct Ed25519 signature
+   over `pairingStatusProof(challengeId, deviceCode)`. It returns only the
+   read-only boolean `approved`; it never authorizes/consumes enrollment.
+   Invalid secrets and signatures fail closed. The client must check no more
+   than every 8 seconds, stop at the existing 5-minute deadline and perform
+   the separate signed redeem only after the real owner's browser approval.
+   Each verified ingress source and challenge may use at most 40 status checks
+   per 15-minute budget window (PostgreSQL counters are capped at 41).
+   Owner-only WAF pilot rules MUST include this additional /status route
+   alongside challenge, redeem and connector/ws, before flags are enabled.
+4. `POST /api/v1/pairing/device/redeem` with
    `{ "challengeId": "<uuid>", "deviceCode": "<base64url>",
    "signature": "<Ed25519 signature base64url>" }`.
    The signature covers `redemptionProof(challengeId, deviceCode)` using

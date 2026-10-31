@@ -7,6 +7,11 @@ const issueSchema=z.strictObject({
   alias:z.string().min(1).max(64),
   publicKeyDer:z.string().min(44).max(192).regex(/^[A-Za-z0-9+/]+={0,2}$/)
 });
+const statusSchema=z.strictObject({
+  challengeId:z.uuid(),
+  deviceCode:z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  signature:z.string().regex(/^[A-Za-z0-9_-]{86}$/)
+});
 const redeemSchema=z.strictObject({
   challengeId:z.uuid(),
   deviceCode:z.string().regex(/^[A-Za-z0-9_-]{43}$/),
@@ -50,6 +55,7 @@ export async function handlePairingDeviceRequest(
 ):Promise<boolean>{
   const path=(req.url??"").split("?")[0];
   if(path!=="/api/v1/pairing/device/challenge"&&
+     path!=="/api/v1/pairing/device/status"&&
      path!=="/api/v1/pairing/device/redeem")return false;
   if(req.method!=="POST"){reply(res,405,{error:"method_not_allowed"});return true;}
   if(req.url!==path||req.headers.origin!==undefined||
@@ -84,6 +90,18 @@ export async function handlePairingDeviceRequest(
       expiresAtMs:result.data.expiresAtMs,
       ...(publicOrigin?{verificationUriComplete:publicOrigin+"/devices/pairing#challenge="+
         encodeURIComponent(result.data.id)+"&code="+encodeURIComponent(result.data.userCode)}:{})});return true;
+  }
+  if(path.endsWith("/status")){
+    const fields=statusSchema.safeParse(parsed);
+    if(!fields.success){reply(res,400,{error:"invalid_request"});return true;}
+    const secret=canonicalUrlB64(fields.data.deviceCode,32);
+    const signature=canonicalUrlB64(fields.data.signature,64);
+    if(!secret||!signature){reply(res,400,{error:"invalid_request"});return true;}
+    const result=await api.approved(source,fields.data.challengeId,
+      fields.data.deviceCode,signature);
+    if(result.kind==="throttled"){reply(res,429,{error:"rate_limited"});return true;}
+    if(result.kind!=="ok"){reply(res,400,{error:"unavailable"});return true;}
+    reply(res,200,{approved:result.data.approved});return true;
   }
   const fields=redeemSchema.safeParse(parsed);
   if(!fields.success){reply(res,400,{error:"invalid_request"});return true;}

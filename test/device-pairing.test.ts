@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import {
   issuePairing, reviewPairing, redeemPairing, redemptionProof,
+  pairingApprovalState,pairingStatusProof,
   PAIRING_TTL_MS, MAX_USER_CODE_ATTEMPTS
 } from "../src/device-pairing.js";
 
@@ -93,4 +94,26 @@ test("input and key policy reject unsafe aliases, non-Ed25519 keys and weak serv
   const rsaDer = rsa.publicKey.export({ format: "der", type: "spki" }) as Buffer;
   assert.throws(() => issuePairing(serverKey, now, "PC", rsaDer));
   assert.throws(() => issuePairing(serverKey, -1, "PC", key), /INVALID_PAIRING_CLOCK/);
+});
+
+
+test("signed status only reports owner-approved state, never consumes enrollment",()=>{
+  const issued=fixture();
+  const id=issued.record.id;
+  const proof=sign(null,pairingStatusProof(id,issued.deviceCode),issued.privateKey);
+  assert.equal(pairingApprovalState(issued.record,serverKey,now+1,issued.deviceCode,proof),false);
+  const reviewed=reviewPairing(issued.record,serverKey,now+2,"owner",issued.userCode,"approve");
+  assert.equal(reviewed.kind,"approved");
+  assert.equal(pairingApprovalState(reviewed.record,serverKey,now+3,issued.deviceCode,proof),true);
+  const wrong=randomBytes(32).toString("base64url");
+  assert.equal(pairingApprovalState(reviewed.record,serverKey,now+3,wrong,proof),null);
+  const outsider=generateKeyPairSync("ed25519");
+  assert.equal(pairingApprovalState(reviewed.record,serverKey,now+3,issued.deviceCode,
+    sign(null,pairingStatusProof(id,issued.deviceCode),outsider.privateKey)),null);
+  const redemption=sign(null,redemptionProof(id,issued.deviceCode),issued.privateKey);
+  assert.equal(pairingApprovalState(reviewed.record,serverKey,now+3,issued.deviceCode,redemption),null);
+  assert.equal(pairingApprovalState(reviewed.record,serverKey,now+PAIRING_TTL_MS,
+    issued.deviceCode,proof),false);
+  assert.equal(redeemPairing(reviewed.record,serverKey,now+4,issued.deviceCode,redemption).kind,"redeemed");
+  assert.equal(reviewed.record.state,"approved","status must never consume approval");
 });

@@ -75,6 +75,7 @@ async function listen(server:ReturnType<typeof createServer>){
 test("HTTP challenge refuses absent/forged Cloudflare origin even with correct body",async()=>{
   const seen:string[]=[];
   const api:PairingDevicePort={
+    approved:async()=>({kind:"unavailable"}),
     issue:async source=>{
       seen.push(source);
       return {kind:"ok",data:{id:randomUUID(),userCode:"ABCDEF-123456",
@@ -172,6 +173,7 @@ test("private owner SSH ingress pins only the Docker gateway without forwarded c
 test("private SSH source is enforced by pairing HTTP even without CF headers",async()=>{
   const seen:string[]=[];
   const api:PairingDevicePort={
+    approved:async()=>({kind:"unavailable"}),
     issue:async source=>{seen.push(source);return {kind:"unavailable"};},
     enroll:async()=>({kind:"unavailable"})
   };
