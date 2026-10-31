@@ -6,6 +6,7 @@ import {PgConnectorReadGate} from "./connector-read-gate.js";
 import {BoundConnectorConnections} from "./connector-transport-binding.js";
 import {attachConnectorWebSocket} from "./connector-ws.js";
 import {openOwnerConsentRuntime} from "./owner-read-consumer-runtime.js";
+import {openConfiguredOwnerIntentDelivery} from "./owner-read-intent-runtime.js";
 import {PgDeviceManagement} from "./device-management.js";
 import {PgPairingReview} from "./pairing-review.js";
 import {PgPairingDeviceAPI} from "./pairing-device-api.js";
@@ -29,6 +30,11 @@ const connectorPool=(wsEnabled||Boolean(identity))?new Pool({connectionString:co
 // With the default flag OFF, reads remain disabled even if WSS is enabled.
 const ownerConsentRuntime=await openOwnerConsentRuntime(
   process.env,config.publicOrigin,wsEnabled,connectorPool);
+const ownerIntentDelivery=await openConfiguredOwnerIntentDelivery(
+  process.env,config.publicOrigin,{
+    wsEnabled,ownerConsentEnabled:Boolean(ownerConsentRuntime),
+    identityEnabled:Boolean(identity)
+  });
 const deviceManagement=identity&&connectorPool?new PgDeviceManagement(connectorPool):undefined;
 const pairingReview=identity&&connectorPool?
   new PgPairingReview(connectorPool,process.env.BETTER_AUTH_SECRET??""):undefined;
@@ -57,7 +63,8 @@ const deviceSource=(wsEnabled||pairingDeviceEnabled)?
 // Lazy binding keeps all read surfaces absent when connector WS is disabled.
 let connectorRelay:ReturnType<typeof attachConnectorWebSocket>|null=null;
 const server=createHttpServer(config, inventory, createVerifier(config), {grants:inventory, identity:identity, devices:deviceManagement, pairings:pairingReview, pairingDevice:pairingDevice, deviceSource:deviceSource,
-  mcpProjectPresenceEnabled:operatorLocalOnce,summaryRelay:()=>connectorRelay});
+  mcpProjectPresenceEnabled:operatorLocalOnce,summaryRelay:()=>connectorRelay,
+  ...(ownerIntentDelivery?{ownerIntentDelivery}:{})});
 const connectorWs=wsEnabled&&connectorPool?attachConnectorWebSocket(server,{
   publicOrigin:config.publicOrigin,
   sourceOf:deviceSource!,
