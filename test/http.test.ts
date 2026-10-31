@@ -41,13 +41,16 @@ const grants: GrantManagement = {
     return project === id;
   }
 };
+// The synthetic JWT is the same token for both prepare and completion.
+// Its issuance time must not change when CI crosses a wall-clock second.
+const fixtureTokenIssuedAt=Math.floor(Date.now()/1000);
 const verify: Verifier = async token => {
   if (!["test-user-a","test-user-b","admin-user-a","rogue-admin"].includes(token)) throw new Error("invalid");
   const actor: Actor = {
     sub: token === "test-user-b" ? "user-b" : "user-a",
     clientId: token === "admin-user-a" ? "portal-client" : token === "rogue-admin" ? "other-client" : "test-client",
     scopes: new Set(["projects:read", ...(["admin-user-a","rogue-admin"].includes(token) ? ["projects:manage"] : [])]),
-    issuedAt: Math.floor(Date.now()/1000)
+    issuedAt: fixtureTokenIssuedAt
   };
   return actor;
 };
