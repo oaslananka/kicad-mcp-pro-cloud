@@ -773,10 +773,23 @@ once by Cloud's independent receipt-consumer role.
 `src/http.ts` now requires the explicitly injected trusted
 `ownerIntentDelivery` before `/prepare` can return an HTTP 200. Failed
 HTTPS delivery, missing service wiring and expired intents fail closed
-without exposing a usable request ID. **Neither Cloud main.ts nor the
-standalone acceptance CLI wires the signer/receiver or loads their keys**:
-these are testable library contracts, NOT deployed production endpoints.
-No signing key is created or persisted in this repository. Production key
+without exposing a usable request ID. **Cloud main.ts now exposes an explicitly opt-in delivery connection**.
+It defaults to absent; the standalone acceptance CLI still does not wire
+signer or receiver. The Cloud delivery flag requires the built-in identity,
+verified WSS transport and the *separate, restricted* owner receipt consumer.
+Only when `OWNER_READ_INTENT_DELIVERY_ENABLED=true` is explicitly set does
+Cloud load the Ed25519 private signer from the POSIX owner-owned, mode-0600,
+single-link regular file named by `OWNER_READ_INTENT_DELIVERY_SIGNING_KEY_FILE`.
+`OWNER_READ_INTENT_DELIVERY_ORIGIN` must name a distinct exact HTTPS origin;
+`OWNER_READ_INTENT_DELIVERY_CA_FILE` optionally supplies an owner-controlled
+CA certificate bundle for an isolated TLS test. Missing or malformed settings,
+wrong file ownership, symlinks, FIFOs, hard links, HTTPS errors and absent
+owner receipt consumer fail closed. The owner issuer must independently launch
+with its existing restricted roles, verified owner session and active WebAuthn
+credential; merely wiring the Cloud signer **cannot** approve a read. No
+signing key is created or persisted in this repository. Do not enable these
+flags in production without the separate real-human acceptance and release
+controls. Production key
 provisioning, trusted Cloud source identity, independent owner DNS/OAuth app,
 passkey activation, real operator and hardware KiCad E2E still require
 separate acceptance. The release remains **NO-GO**.
