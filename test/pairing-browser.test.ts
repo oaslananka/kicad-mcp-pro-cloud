@@ -38,6 +38,7 @@ test("pairing review requires session and escapes injected content",async()=>{
   assert.equal((await get(fixture(null)))?.status,303);
   const f=fixture(),res=await get(f);
   assert.equal(res?.status,200);
+  assert.equal(res?.headers.get("referrer-policy"),"same-origin");
   const html=await res!.text();
   assert.match(html,/Connect your device/);
   assert.match(html,/Advanced: enter pairing details manually/);
