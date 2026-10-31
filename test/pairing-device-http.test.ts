@@ -32,7 +32,7 @@ test("device endpoints are absent unless separately wired",async()=>{
   const server=createHttpServer(config, inventory, async()=>{throw Error("not called");});
   const l=await listener(server);
   try{
-    for(const path of ["/challenge","/redeem"]){
+    for(const path of ["/challenge","/status","/redeem"]){
       const response=await fetch(l.origin+"/api/v1/pairing/device"+path,{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({deviceId:id})
@@ -44,6 +44,7 @@ test("device endpoints are absent unless separately wired",async()=>{
 test("strict device-only HTTP denies browser, spoofed identity and oversized traffic",async()=>{
   const calls:string[]=[];
   const api:PairingDevicePort={
+    approved:async()=>({kind:"unavailable"}),
     async issue(source,alias,publicKeyDer){
       calls.push("issue:"+source+":"+alias);
       assert.deepEqual(publicKeyDer,key);
@@ -101,6 +102,17 @@ test("strict device-only HTTP denies browser, spoofed identity and oversized tra
     assert.equal(new URLSearchParams(complete.hash.slice(1)).get("code"),"ABCDEF-123456");
     assert.ok(!String(received.verificationUriComplete).includes(secret));
     assert.deepEqual(calls,["issue:127.0.0.1:KiCad Test"]);
+    const statusPath=l.origin+"/api/v1/pairing/device/status";
+    const invalidStatus=await fetch(statusPath,{method:"POST",headers:{
+      "Content-Type":"application/json"
+    },body:JSON.stringify({challengeId:id,deviceCode:secret,
+      signature:"x".repeat(85)})});
+    assert.equal(invalidStatus.status,400);
+    const crossOriginStatus=await fetch(statusPath,{method:"POST",headers:{
+      "Content-Type":"application/json",Origin:"https://attacker.example"
+    },body:JSON.stringify({challengeId:id,deviceCode:secret,
+      signature:randomBytes(64).toString("base64url")})});
+    assert.equal(crossOriginStatus.status,403);
     const redeem=await fetch(l.origin+"/api/v1/pairing/device/redeem",{
       method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({challengeId:id,deviceCode:secret,
@@ -116,6 +128,7 @@ test("strict device-only HTTP denies browser, spoofed identity and oversized tra
 test("redemption rejects incorrect signature and code encoding before store",async()=>{
   let called=false;
   const api:PairingDevicePort={
+    approved:async()=>({kind:"unavailable"}),
     issue:async()=>({kind:"unavailable"}),
     enroll:async()=>{called=true;return {kind:"unavailable"};}
   };

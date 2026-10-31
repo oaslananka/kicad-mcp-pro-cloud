@@ -138,6 +138,29 @@ export function reviewPairing(
   return { kind: next.state, record: next };
 }
 
+/** A different signature domain than one-use redeem; never grants enrollment. */
+export function pairingStatusProof(id:string,deviceCode:string):Buffer{
+  return Buffer.from("kicad-cloud-pairing-status-v1\0"+id+"\0"+deviceCode,"utf8");
+}
+
+/** Only a device holding BOTH the issued secret and its Ed25519 key may read this bit. */
+export function pairingApprovalState(
+  record:PairingRecord,serverKey:Buffer,nowMs:number,
+  deviceCode:string,signature:Buffer
+):boolean|null{
+  requireServerKey(serverKey);
+  if(!validClock(nowMs)||typeof deviceCode!=="string"||deviceCode.length!==43||
+     !Buffer.isBuffer(signature)||signature.length!==64||
+     !matches(serverKey,"device",deviceCode,record.deviceCodeMac))return null;
+  try{
+    const key=createPublicKey({key:Buffer.from(record.devicePublicKeyDer,"base64"),
+      format:"der",type:"spki"});
+    if(key.asymmetricKeyType!=="ed25519"||
+       !verify(null,pairingStatusProof(record.id,deviceCode),key,signature))return null;
+  }catch{return null;}
+  return record.state==="approved"&&nowMs<record.expiresAtMs;
+}
+
 export function redemptionProof(id: string, deviceCode: string): Buffer {
   return Buffer.from("kicad-cloud-pairing-proof-v1\0" + id + "\0" + deviceCode, "utf8");
 }

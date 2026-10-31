@@ -4,7 +4,7 @@ import {test} from "node:test";
 import {inIsolatedDatabase} from "./isolated-db.js";
 import {PgPairingDeviceAPI} from "../src/pairing-device-api.js";
 import {PgPairingReview} from "../src/pairing-review.js";
-import {redemptionProof} from "../src/device-pairing.js";
+import {redemptionProof,pairingStatusProof} from "../src/device-pairing.js";
 import {PgDeviceHandshakes} from "../src/device-handshake.js";
 
 const conn=process.env.TEST_DATABASE_URL;
@@ -27,11 +27,24 @@ test("approved pairing is consumed once by the authentic device key, enrolled di
     assert.equal(issued.kind,"ok");
     if(issued.kind!=="ok")return;
     const challenge=issued.data;
+    const statusSignature=sign(null,pairingStatusProof(challenge.id,challenge.deviceCode),
+      key.privateKey);
+    assert.deepEqual(await a.approved("127.0.0.1",challenge.id,
+      challenge.deviceCode,statusSignature),{kind:"ok",data:{approved:false}});
+    assert.equal((await a.approved("127.0.0.1",challenge.id,
+      randomBytes(32).toString("base64url"),statusSignature)).kind,"unavailable");
+    const impostor=sign(null,pairingStatusProof(challenge.id,challenge.deviceCode),
+      generateKeyPairSync("ed25519").privateKey);
+    assert.equal((await a.approved("127.0.0.1",challenge.id,
+      challenge.deviceCode,impostor)).kind,"unavailable");
     const proper=sign(null,redemptionProof(challenge.id,challenge.deviceCode),key.privateKey);
     const forged=sign(null,redemptionProof(challenge.id,challenge.deviceCode),
       generateKeyPairSync("ed25519").privateKey);
     assert.equal((await a.enroll("127.0.0.1",challenge.id,challenge.deviceCode,proper)).kind,"unavailable");
     assert.equal(await review.review(challenge.id,owner,challenge.userCode,"approve"),"approved");
+    assert.deepEqual(await b.approved("127.0.0.1",challenge.id,
+      challenge.deviceCode,statusSignature),{kind:"ok",data:{approved:true}});
+
     assert.equal((await a.enroll("127.0.0.1",challenge.id,challenge.deviceCode,forged)).kind,"unavailable");
     assert.equal((await a.enroll("127.0.0.1",challenge.id,
       randomBytes(32).toString("base64url"),proper)).kind,"unavailable");
@@ -57,6 +70,9 @@ test("approved pairing is consumed once by the authentic device key, enrolled di
     assert.equal((await pool.query("SELECT state FROM pairing_challenges WHERE id=$1",
       [challenge.id])).rows[0].state,"consumed");
     assert.equal((await new PgDeviceHandshakes(pool).issue(owner,deviceId)).kind,"unavailable");
+    assert.deepEqual(await a.approved("127.0.0.1",challenge.id,
+      challenge.deviceCode,statusSignature),{kind:"ok",data:{approved:false}});
+
     assert.equal((await b.enroll("127.0.0.1",challenge.id,challenge.deviceCode,proper)).kind,"unavailable");
   });
 });

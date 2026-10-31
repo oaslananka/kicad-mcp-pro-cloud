@@ -9,6 +9,8 @@ export interface PairingDevicePort {
   issue(source:string,alias:string,publicKeyDer:Buffer):Promise<PairingDeviceOutcome<IssueResult>>;
   enroll(source:string,id:string,deviceCode:string,signature:Buffer):
     Promise<PairingDeviceOutcome<Enrollment>>;
+  approved(source:string,id:string,deviceCode:string,signature:Buffer):
+    Promise<PairingDeviceOutcome<{approved:boolean}>>;
 }
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // Keep all counters saturated inside the schema's 1..41 bound.
@@ -60,6 +62,16 @@ export class PgPairingDeviceAPI implements PairingDevicePort {
         return {kind:"unavailable"};
       throw error;
     }
+  }
+  async approved(source:string,id:string,deviceCode:string,signature:Buffer):
+    Promise<PairingDeviceOutcome<{approved:boolean}>>{
+    if(!source||source.length>256||typeof deviceCode!=="string"||!UUID.test(id)||deviceCode.length!==43||
+       !Buffer.isBuffer(signature)||signature.length!==64)return {kind:"unavailable"};
+    // Allow at most 40 checks within 15 minutes; DB counters saturate at 41.
+    if(!await this.take("status-source",source,40))return {kind:"throttled"};
+    if(!await this.take("status-challenge",id,40))return {kind:"throttled"};
+    const approved=await this.store.approved(id,deviceCode,signature);
+    return approved===null?{kind:"unavailable"}:{kind:"ok",data:{approved}};
   }
   async enroll(source:string,id:string,deviceCode:string,signature:Buffer):
     Promise<PairingDeviceOutcome<Enrollment>>{
