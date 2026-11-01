@@ -8,6 +8,9 @@ services:
       database: {}
       ingress_private:
         ipv4_address: ${KICAD_INGRESS_APP_IP:?Preapproved application ingress IPv4}
+      # Existing dedicated egress network permits fetching dynamic OAuth
+      # client metadata; incoming device WSS remains on pinned private ingress.
+      connector_egress: {}
   cloudflared_kicad:
     image: cloudflare/cloudflared:2026.10.0
     restart: unless-stopped

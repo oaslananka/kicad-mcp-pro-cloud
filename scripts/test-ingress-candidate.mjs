@@ -18,7 +18,8 @@ function valid(){
       app:{
         image:"kicad-mcp-pro-cloud:production",
         environment:{AUTH_MODE:"external"},
-        networks:{database:{},ingress_private:{ipv4_address:env.KICAD_INGRESS_APP_IP}},
+        networks:{database:{},ingress_private:{ipv4_address:env.KICAD_INGRESS_APP_IP},
+          connector_egress:{}},
         read_only:true,cap_drop:["ALL"]
       },
       db:{
@@ -50,7 +51,10 @@ const scenarios=[
   ["re-introduces shared ops_internal network",m=>{
     m.networks.tunnel={name:"ops_internal",external:true};
   }],
-  ["app accidentally re-joins a third network",m=>{
+  ["app loses the dedicated outbound OAuth metadata path",m=>{
+    delete m.services.app.networks.connector_egress;
+  }],
+  ["app accidentally re-joins shared ops infrastructure",m=>{
     m.services.app.networks.ops_internal={};
   }],
   ["connector silently reuses shared egress",m=>{
