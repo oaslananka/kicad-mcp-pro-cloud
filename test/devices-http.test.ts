@@ -116,6 +116,8 @@ test("owner device activation and read-only project creation are disabled by def
   }, {identity:identity, devices:devices, pairingDevice:{} as never}));
   try{
     const page=await fetch(enabled.origin+"/devices");
+    assert.equal(page.headers.get("referrer-policy"),"same-origin",
+      "first-party device forms must retain the browser Origin for strict POST validation");
     const html=await page.text();
     assert.match(html,/Enable my device/);
     const csrf=/<form action="\/devices\/enable"[\s\S]*?name="csrf" value="([^"]+)"/.exec(html)?.[1]??"";
