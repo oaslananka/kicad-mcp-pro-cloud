@@ -35,7 +35,9 @@ function reply({status,devices=[],message,stateCookie,enrollmentAvailable=true,
   projects=[],ownerSub,clients=[]}:DeviceReply):Response{
   const response=new Response(renderDevicesPage(devices,message,enrollmentAvailable,projects,ownerSub,clients),{status,headers:{
     "Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store",
-    "Referrer-Policy":"no-referrer","X-Content-Type-Options":"nosniff",
+    // Preserve Origin on same-origin form POSTs; Chrome sends Origin: null
+    // under no-referrer. Cross-site referrers remain hidden.
+    "Referrer-Policy":"same-origin","X-Content-Type-Options":"nosniff",
     "Content-Security-Policy":"default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'self'"
   }});
   if(stateCookie)response.headers.append("Set-Cookie",stateCookie);
