@@ -61,7 +61,7 @@ function field(obj:Record<string,unknown>,key:string):string{
   return obj[key] as string;
 }
 
-async function startFixtureServer(db:Pool,operatorLocalOnce=false){
+async function startFixtureServer(db:Pool,operatorLocalOnce=false,nativeDrcOnce=false){
   const server=createServer((_req,res)=>{res.writeHead(404);res.end();});
   await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
   const port=(server.address() as AddressInfo).port;
@@ -69,7 +69,7 @@ async function startFixtureServer(db:Pool,operatorLocalOnce=false){
     publicOrigin:"http://127.0.0.1:"+port,
     sourceOf:()=>"127.0.0.1",
     proofs:new PgDeviceHandshakes(db),
-    ...(operatorLocalOnce?{operatorLocalOnce:true}:
+    ...(operatorLocalOnce?{operatorLocalOnce:true,operatorNativeDrcOnce:nativeDrcOnce}:
       {ownerConsent:{consume:async()=>true}}), // Synthetic, not human approval.
     connections:new BoundConnectorConnections(
       new PgConnectorSessions(db),new PgConnectorReadGate(db))
@@ -313,6 +313,104 @@ test("authenticated Cloud socket rejects revocation and expired reads after wall
         }
       }finally{
         Date.now=actualDateNow;
+        ws?.terminate();
+        await attached.close();
+        await new Promise<void>(resolve=>server.close(()=>resolve()));
+      }
+    });
+  }
+});
+
+// Local integration-only: real cryptographic WSS challenges, isolated SQL
+// grant state, and strict native DRC reply framing. Not an owner/WebAuthn UV.
+test("signed one-shot WSS admits only explicit native DRC count results",
+  {skip:!url,timeout:70_000},async()=>{
+  for(const behavior of ["allowed","wrong_operation","revoked","flag_off"] as const){
+    await inIsolatedDatabase(url!,migrations,async db=>{
+      const owner="native-drc-owner",clientId="native-drc-client";
+      const keys=generateKeyPairSync("ed25519");
+      const der=keys.publicKey.export({format:"der",type:"spki"}) as Buffer;
+      const pair=new PgPairingChallenges(db,randomBytes(32));
+      const challenge=await pair.issue("Test board",der);
+      assert.equal(await pair.review(challenge.id,owner,challenge.userCode,"approve"),"approved");
+      const enrolled=await pair.enroll(challenge.id,challenge.deviceCode,
+        sign(null,redemptionProof(challenge.id,challenge.deviceCode),keys.privateKey));
+      assert.equal(enrolled.kind,"enrolled");
+      if(enrolled.kind!=="enrolled")return;
+      const device=enrolled.deviceId;
+      const project="77777777-7777-4777-8777-777777777777";
+      await db.query("UPDATE devices SET enabled=true WHERE id=$1",[device]);
+      await db.query("INSERT INTO projects(id,owner_sub,device_id,alias,enabled,max_mode) "+
+        "VALUES($1,$2,$3,'Safe DRC',true,'readonly')",[project,owner,device]);
+      await db.query("INSERT INTO project_client_grants(project_id,owner_sub,client_id,enabled,max_mode) "+
+        "VALUES($1,$2,$3,true,'readonly')",[project,owner,clientId]);
+      const {server,port,attached}=await startFixtureServer(db,true,behavior!=="flag_off");
+      let ws:WebSocket|undefined;
+      try{
+        ws=await connect("ws://127.0.0.1:"+port+"/api/v1/connector/ws");
+        const hello=await send(ws,{
+          kind:"device.hello",version:1,ownerSub:owner,deviceId:device
+        });
+        const deviceSignature=sign(null,deviceHandshakeProof(
+          field(hello,"challengeId"),device,field(hello,"nonce")),
+        keys.privateKey).toString("base64url");
+        const session=await send(ws,{
+          kind:"device.proof",version:1,signature:deviceSignature
+        });
+        const sessionSignature=sign(null,connectorSessionProof(
+          field(session,"sessionId"),field(session,"challengeId"),device,
+          field(session,"nonce"),field(session,"binding")),
+        keys.privateKey).toString("base64url");
+        const ready=await send(ws,{
+          kind:"connector.session_proof",version:1,signature:sessionSignature
+        });
+        assert.equal(ready.kind,"connector.ready");
+        const oauth={ownerSub:owner,clientId,
+          accessTokenIssuedAtSeconds:Math.floor(Date.now()/1000)};
+        const pendingIntent=attached.prepareOwnerDrc(oauth,device,project);
+        if(behavior==="flag_off"){
+          assert.equal(pendingIntent,null,"A normal one-shot session cannot invoke native DRC");
+          return;
+        }
+        assert.ok(pendingIntent);
+        assert.equal(pendingIntent.operation,"run_drc");
+        assert.equal(attached.prepareOwnerSummary(oauth,device,project),null,
+          "A signed WSS session reserves only one operation");
+        const outbound=waitMessage(ws);
+        const promise=attached.requestDrc(oauth,device,project,pendingIntent);
+        const frame=await outbound;
+        assert.equal(frame.kind,"connector.authorized_read");
+        const request=frame.request as Record<string,unknown>;
+        assert.equal(request.operation,"run_drc");
+        assert.equal(request.projectId,project);
+        assert.equal(request.requestId,pendingIntent.requestId);
+        assert.equal(await attached.requestDrc(oauth,device,project,pendingIntent),
+          null,"An issued intent is single-use");
+        if(behavior==="revoked")
+          await db.query("UPDATE project_client_grants SET enabled=false "+
+            "WHERE project_id=$1",[project]);
+        const reply=behavior==="wrong_operation"?
+          {kind:"connector.local_read_preview",version:1,
+            requestId:request.requestId,projectId:project,
+            operation:"project_summary",
+            files:{projectPresent:true,boardPresent:true,schematicPresent:true}}:
+          {kind:"connector.local_drc_preview",version:1,
+            requestId:request.requestId,projectId:project,operation:"run_drc",
+            counts:{violations:1,unconnectedItems:0}};
+        const ack=behavior==="allowed"?waitMessage(ws):null;
+        ws.send(JSON.stringify({
+          kind:"connector.read_result",version:1,sequence:1,result:reply
+        }));
+        const result=await promise;
+        if(behavior==="allowed"){
+          assert.deepEqual(result,reply);
+          const confirmation=await ack!;
+          assert.equal(confirmation.kind,"connector.read_ack");
+          assert.equal(confirmation.requestId,request.requestId);
+        }else{
+          assert.equal(result,null,"No counts after revocation or operation confusion");
+        }
+      }finally{
         ws?.terminate();
         await attached.close();
         await new Promise<void>(resolve=>server.close(()=>resolve()));
