@@ -5,9 +5,10 @@ import {lockActiveDeviceKey,withDeviceTransaction} from "./device-db-transaction
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_BYTES=8192;
-// This Cloud release authorizes exactly one metadata-only summary.
-// DRC/ERC remain protocol vocabulary for future separately approved operations,
-// but may never pass this connector read boundary.
+// Signed incoming read-proof validation remains metadata-only; the distinct,
+// default-OFF owner-foreground DRC count pilot reuses the trusted server-side
+// outgoing project/session authorization check and has its own fixed wire kind.
+// ERC and untrusted/native incoming operations remain blocked.
 const READ_OPERATIONS:readonly ReadOperation[]=["project_summary"];
 type SessionRow={expires_at:Date;state:string;last_sequence:string;connection_digest:string};
 type GrantRow={project_enabled:boolean;grant_enabled:boolean;project_mode:string;grant_mode:string};

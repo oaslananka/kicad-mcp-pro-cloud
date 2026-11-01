@@ -27,14 +27,26 @@ export type PreparedOwnerSummary=Readonly<{
   projectId:string;origin:string;operation:"project_summary";
   expiresAtUnixMs:number;
 }>;
+export type PreparedOwnerDrc=Omit<PreparedOwnerSummary,"operation">&{
+  operation:"run_drc";
+};
+type PreparedRead=PreparedOwnerSummary|PreparedOwnerDrc;
+type ReadOperation="project_summary"|"run_drc";
 type State="new"|"device_challenge"|"session_challenge"|"ready"|"closed";
 export type SummaryReadResult={
   kind:"connector.local_read_preview";version:1;requestId:string;
   projectId:string;operation:"project_summary";
   files:{projectPresent:boolean;boardPresent:boolean;schematicPresent:boolean};
 };
-type PendingRead={requestId:string;projectId:string;deadline:number;monotonicDeadline:number;
-  resolve:(value:SummaryReadResult|null)=>void;timer:NodeJS.Timeout};
+export type DrcReadResult={
+  kind:"connector.local_drc_preview";version:1;requestId:string;
+  projectId:string;operation:"run_drc";
+  counts:{violations:number;unconnectedItems:number};
+};
+type ReadResult=SummaryReadResult|DrcReadResult;
+type PendingRead={requestId:string;projectId:string;operation:ReadOperation;
+  deadline:number;monotonicDeadline:number;
+  resolve:(value:ReadResult|null)=>void;timer:NodeJS.Timeout};
 type Entry={
   phase:State; owner:string; device:string; challenge:string; nonce:string;
   queued:number; pending:Promise<void>; timer:NodeJS.Timeout | null;
@@ -51,12 +63,22 @@ const sessionProof=z.strictObject({kind:z.literal("connector.session_proof"),ver
   signature:z.string().regex(/^[A-Za-z0-9_-]{86}$/)});
 const readResult=z.strictObject({
   kind:z.literal("connector.read_result"),version:z.literal(1),
-  sequence:z.literal(1),result:z.strictObject({
-    kind:z.literal("connector.local_read_preview"),version:z.literal(1),
-    requestId:z.uuid(),projectId:z.uuid(),operation:z.literal("project_summary"),
-    files:z.strictObject({projectPresent:z.boolean(),boardPresent:z.boolean(),
-      schematicPresent:z.boolean()})
-  })
+  sequence:z.literal(1),result:z.discriminatedUnion("operation",[
+    z.strictObject({
+      kind:z.literal("connector.local_read_preview"),version:z.literal(1),
+      requestId:z.uuid(),projectId:z.uuid(),operation:z.literal("project_summary"),
+      files:z.strictObject({projectPresent:z.boolean(),boardPresent:z.boolean(),
+        schematicPresent:z.boolean()})
+    }),
+    z.strictObject({
+      kind:z.literal("connector.local_drc_preview"),version:z.literal(1),
+      requestId:z.uuid(),projectId:z.uuid(),operation:z.literal("run_drc"),
+      counts:z.strictObject({
+        violations:z.number().int().nonnegative().max(1000000),
+        unconnectedItems:z.number().int().nonnegative().max(1000000)
+      })
+    })
+  ])
 });
 const CLOSE_POLICY=1008;
 const MAX_SOCKETS=96;
@@ -90,7 +112,8 @@ function asJson(raw:Buffer):unknown{
 }
 /**
  * Live WebSocket transport for an outbound device-initiated connection.
- * Feature gated OFF by default. No MCP/AI command relay or KiCad operation.
+ * Feature gated OFF by default. Native read-only DRC counts require a second
+ * explicit one-shot operator flag; no arbitrary command or file-data relay.
  * TLS termination MUST be enforced by a trusted ingress before activation
  * in production; the upgrade route itself is HTTP on the internal listener.
  */
@@ -106,9 +129,13 @@ export function attachConnectorWebSocket(
      * Explicit no-customer metadata pilot: the owner already granted the
      * OAuth client/project in Cloud and manually started a one-shot device
      * process. No independent WebAuthn ceremony is asserted by this mode.
-     * Never use for file contents or executable KiCad operations.
+     * A separate, default-off flag is required before a single native DRC
+     * counts-only operation can be requested. No general commands or paths.
      */
     operatorLocalOnce?:boolean;
+    // Separate opt-in flag for foreground owner-operated native DRC counts.
+    // Without this flag even the local one-shot pilot cannot run KiCad.
+    operatorNativeDrcOnce?:boolean;
     maxConnections?:number;
     sourceOf:RequestSourceResolver;
   }
@@ -116,11 +143,17 @@ export function attachConnectorWebSocket(
   prepareOwnerSummary:(oauth:TrustedOAuthReadIdentity,deviceId:string,
     projectId:string)=>PreparedOwnerSummary|null;
   requestSummary:(oauth:TrustedOAuthReadIdentity,deviceId:string,
-    projectId:string,prepared?:PreparedOwnerSummary)=>Promise<SummaryReadResult|null>}{
+    projectId:string,prepared?:PreparedOwnerSummary)=>Promise<SummaryReadResult|null>;
+  prepareOwnerDrc:(oauth:TrustedOAuthReadIdentity,deviceId:string,
+    projectId:string)=>PreparedOwnerDrc|null;
+  requestDrc:(oauth:TrustedOAuthReadIdentity,deviceId:string,
+    projectId:string,prepared?:PreparedOwnerDrc)=>Promise<DrcReadResult|null>}{
   // Never let a lightweight pilot setting downgrade an independent owner
   // approval dependency, even when used outside the production entrypoint.
   if(options.operatorLocalOnce&&options.ownerConsent)
     throw Error("Conflicting owner approval modes");
+  if(options.operatorNativeDrcOnce&&!options.operatorLocalOnce)
+    throw Error("Native DRC pilot requires explicit local one-shot mode");
   const wss=new WebSocketServer({noServer:true,perMessageDeflate:false,
     maxPayload:1024,clientTracking:true});
   const sockets=new Set<WebSocket>();
@@ -131,10 +164,10 @@ export function attachConnectorWebSocket(
   // Per-device throttle limits challenge reservation from self-claimed IDs.
   // Distributed DoS limits are still required before feature activation.
   const deviceWindows=new Map<string,{start:number,count:number}>();
-  const preparedIntents=new WeakMap<PreparedOwnerSummary,{
+  const preparedIntents=new WeakMap<PreparedRead,{
     socket:WebSocket;scope:string;deadline:number;
   }>();
-  const reservedSockets=new WeakMap<WebSocket,PreparedOwnerSummary>();
+  const reservedSockets=new WeakMap<WebSocket,PreparedRead>();
   let stopped=false;
   const waitingOAuth=new WeakMap<PendingRead,TrustedOAuthReadIdentity>();
 
@@ -273,7 +306,8 @@ export function attachConnectorWebSocket(
             if(!decoded.success||Date.now()>=pending.deadline||
                performance.now()>=pending.monotonicDeadline||
                decoded.data.result.requestId!==pending.requestId||
-               decoded.data.result.projectId!==pending.projectId){
+               decoded.data.result.projectId!==pending.projectId||
+               decoded.data.result.operation!==pending.operation){
               entry.validating=undefined;
               clearTimeout(pending.timer);
               pending.resolve(null);fail();return;
@@ -360,8 +394,10 @@ export function attachConnectorWebSocket(
    * Prepare the exact owner-facing intent BEFORE a browser WebAuthn ceremony.
    * Server-side only: no Cloud HTTP route and no bearer-token semantics.
    */
-  function prepareOwnerSummary(oauth:TrustedOAuthReadIdentity,
-    deviceId:string,projectId:string):PreparedOwnerSummary|null{
+  function prepareRead(oauth:TrustedOAuthReadIdentity,
+    deviceId:string,projectId:string,operation:ReadOperation):PreparedRead|null{
+    if(operation==="run_drc"&&!(options.operatorLocalOnce&&options.operatorNativeDrcOnce))
+      return null;
     if(stopped||(!options.ownerConsent&&!options.operatorLocalOnce)||!oauth||
        typeof oauth.ownerSub!=="string"||!oauth.ownerSub||
        typeof oauth.clientId!=="string"||!oauth.clientId||
@@ -372,11 +408,11 @@ export function attachConnectorWebSocket(
        active.entry.awaiting||active.socket.readyState!==WebSocket.OPEN||
        (active.entry.sessionDeadline??0)-performance.now()<40_000||
        reservedSockets.has(active.socket))return null;
-    const intent:PreparedOwnerSummary=Object.freeze({
+    const intent=Object.freeze({
       requestId:randomUUID(),ownerSub:oauth.ownerSub,clientId:oauth.clientId,
       deviceId,projectId,origin:options.publicOrigin,
-      operation:"project_summary",expiresAtUnixMs:Date.now()+30_000
-    });
+      operation,expiresAtUnixMs:Date.now()+30_000
+    }) as PreparedRead;
     preparedIntents.set(intent,{
       socket:active.socket,
       scope:JSON.stringify([oauth.ownerSub,oauth.clientId,deviceId,projectId]),
@@ -391,8 +427,20 @@ export function attachConnectorWebSocket(
     return intent;
   }
 
-  async function requestSummary(oauth:TrustedOAuthReadIdentity,deviceId:string,
-    projectId:string,prepared?:PreparedOwnerSummary):Promise<SummaryReadResult|null>{
+  function prepareOwnerSummary(oauth:TrustedOAuthReadIdentity,
+    deviceId:string,projectId:string):PreparedOwnerSummary|null{
+    return prepareRead(oauth,deviceId,projectId,"project_summary") as PreparedOwnerSummary|null;
+  }
+  function prepareOwnerDrc(oauth:TrustedOAuthReadIdentity,
+    deviceId:string,projectId:string):PreparedOwnerDrc|null{
+    return prepareRead(oauth,deviceId,projectId,"run_drc") as PreparedOwnerDrc|null;
+  }
+
+  async function requestRead(oauth:TrustedOAuthReadIdentity,deviceId:string,
+    projectId:string,prepared:PreparedRead|undefined,
+    operation:ReadOperation):Promise<ReadResult|null>{
+    if(operation==="run_drc"&&!(options.operatorLocalOnce&&options.operatorNativeDrcOnce))
+      return null;
     if(stopped||(!options.ownerConsent&&!options.operatorLocalOnce)||!oauth||typeof oauth.ownerSub!=="string"||
       !/^[0-9a-f-]{36}$/i.test(deviceId)||
       !/^[0-9a-f-]{36}$/i.test(projectId))return null;
@@ -416,7 +464,7 @@ export function attachConnectorWebSocket(
        prepared.clientId!==oauth.clientId||
        prepared.deviceId!==deviceId||prepared.projectId!==projectId||
        prepared.origin!==options.publicOrigin||
-       prepared.operation!=="project_summary"||
+       prepared.operation!==operation||
        reserved.deadline<=performance.now()||
        prepared.expiresAtUnixMs<=Date.now())return null;
     const requestId=prepared.requestId;
@@ -492,7 +540,7 @@ export function attachConnectorWebSocket(
     if(performance.now()>=ownerExpiresAtMonotonic||Date.now()>=ownerExpiresAtUnixMs){
       reject(socket);return null;
     }
-    return new Promise<SummaryReadResult|null>(resolve=>{
+    return new Promise<ReadResult|null>(resolve=>{
       const timer=setTimeout(()=>{
         entry.awaiting=undefined;
         entry.validating=undefined;
@@ -506,20 +554,32 @@ export function attachConnectorWebSocket(
       if(deadline<=Date.now()||monotonicDeadline<=performance.now()){
         clearTimeout(timer);resolve(null);reject(socket);return;
       }
-      const pending:PendingRead={requestId,projectId,deadline,monotonicDeadline,resolve,timer};
+      const pending:PendingRead={requestId,projectId,operation,
+        deadline,monotonicDeadline,resolve,timer};
       waitingOAuth.set(pending,oauth);
       entry.awaiting=pending;
       try{socket.send(JSON.stringify({
         kind:"connector.authorized_read",version:1,sequence:1,
         request:{kind:"connector.read_request",version:1,requestId,
-          deviceId,projectId,operation:"project_summary",deadlineUnixMs:deadline}
+          deviceId,projectId,operation,deadlineUnixMs:deadline}
       }));}catch{
         clearTimeout(timer);entry.awaiting=undefined;resolve(null);reject(socket);
       }
     });
   }
 
-  return {prepareOwnerSummary,requestSummary,close:async()=>{
+  async function requestSummary(oauth:TrustedOAuthReadIdentity,deviceId:string,
+    projectId:string,prepared?:PreparedOwnerSummary):Promise<SummaryReadResult|null>{
+    const result=await requestRead(oauth,deviceId,projectId,prepared,"project_summary");
+    return result?.operation==="project_summary"?result:null;
+  }
+  async function requestDrc(oauth:TrustedOAuthReadIdentity,deviceId:string,
+    projectId:string,prepared?:PreparedOwnerDrc):Promise<DrcReadResult|null>{
+    const result=await requestRead(oauth,deviceId,projectId,prepared,"run_drc");
+    return result?.operation==="run_drc"?result:null;
+  }
+
+  return {prepareOwnerSummary,requestSummary,prepareOwnerDrc,requestDrc,close:async()=>{
     if(stopped)return;
     stopped=true;
     clearInterval(heartbeat);

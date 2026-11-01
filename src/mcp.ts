@@ -14,9 +14,13 @@ export type ProjectPresenceFiles = Readonly<{
 }>;
 export type ProjectPresenceReader =
   (deviceId:string,projectId:string)=>Promise<ProjectPresenceFiles|null>;
+export type DrcCounts=Readonly<{violations:number;unconnectedItems:number}>;
+export type ProjectDrcReader =
+  (deviceId:string,projectId:string)=>Promise<DrcCounts|null>;
 
 export function createCloudMcpHandler(
-  inventory: Inventory, actor: Actor, projectPresence?:ProjectPresenceReader
+  inventory: Inventory, actor: Actor, projectPresence?:ProjectPresenceReader,
+  projectDrc?:ProjectDrcReader
 ) {
   return createMcpHandler(() => {
     const mcp = new McpServer({ name: "kicad-mcp-pro-cloud", version: "0.1.0" });
@@ -24,13 +28,16 @@ export function createCloudMcpHandler(
       description: "Describe Cloud connectivity limits and current feature availability. No local KiCad operation is performed.",
       inputSchema: z.object({}), annotations: readonly
     }, async () => text({
-      status: projectPresence ? "local_presence_pilot" : "foundation_only",
-      remoteKiCadExecution: false,
+      status: projectDrc ? "local_native_drc_pilot" :
+        projectPresence ? "local_presence_pilot" : "foundation_only",
+      remoteKiCadExecution: Boolean(projectDrc),
       devicePairing: Boolean(projectPresence),
       projectManagementWrites: false,
-      message: projectPresence
-        ? "Only one-shot, owner-granted project presence flags are available; no KiCad commands or file contents."
-        : "Cloud inventory is read-only. A local connector is not yet available."
+      message: projectDrc
+        ? "Owner-operated one-shot native DRC counts only; no board contents, file paths or arbitrary commands."
+        : projectPresence
+          ? "Only one-shot, owner-granted project presence flags are available; no KiCad commands or file contents."
+          : "Cloud inventory is read-only. A local connector is not yet available."
     }));
     mcp.registerTool("list_devices", {
       description: "List the authenticated user's registered device metadata. Connected always false until a verified device relay exists.",
@@ -62,6 +69,21 @@ export function createCloudMcpHandler(
         try{files=await projectPresence(project.deviceId,project_id);}
         catch{files=null;}
         return text(files?{available:true,files}:{available:false});
+      });
+    }
+    // Deliberately absent unless the separate native DRC pilot is enabled.
+    // No board data, paths, command strings, writes or report excerpts.
+    if(projectDrc){
+      mcp.registerTool("get_project_drc_counts",{
+        description:"Run one owner-foreground, read-only native KiCad PCB DRC on a private temporary copy. Returns only violation/unconnected counts. Requires one active one-shot device session.",
+        inputSchema:z.object({project_id:z.string().uuid()}),annotations:readonly
+      },async ({project_id})=>{
+        const project=await inventory.getProject(actor.sub,actor.clientId,project_id);
+        if(!project)return text({available:false});
+        let counts:DrcCounts|null=null;
+        try{counts=await projectDrc(project.deviceId,project_id);}
+        catch{counts=null;}
+        return text(counts?{available:true,counts}:{available:false});
       });
     }
     return mcp;

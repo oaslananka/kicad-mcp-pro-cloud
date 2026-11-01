@@ -735,3 +735,88 @@ test("MCP one-shot presence pilot denies foreign and revoked project access",asy
     await new Promise<void>(resolve=>proxy.close(()=>resolve()));
   }
 });
+
+test("native DRC count tool is separate, scoped, revocable and OFF unless opted in",async()=>{
+  let reads=0;
+  let grantActive=true;
+  let revokeDuringRead=false;
+  const scoped:Inventory={
+    ...inventory,
+    async getProject(owner,clientId,projectId){
+      if(!grantActive)return null;
+      return inventory.getProject(owner,clientId,projectId);
+    }
+  };
+  const relay={
+    prepareOwnerSummary:testPrepared,
+    async requestSummary(){return null;},
+    prepareOwnerDrc(oauth:TrustedOAuthReadIdentity,deviceId:string,projectId:string){
+      if(oauth.ownerSub!=="user-a"||oauth.clientId!=="test-client"||
+        deviceId!==mockProject.deviceId||projectId!==id)return null;
+      return {...testPrepared(oauth,deviceId,projectId),operation:"run_drc" as const};
+    },
+    async requestDrc(_oauth:TrustedOAuthReadIdentity,_deviceId:string,
+      projectId:string,prepared:{requestId:string}){
+      reads++;
+      if(revokeDuringRead)grantActive=false;
+      return {kind:"connector.local_drc_preview" as const,version:1 as const,
+        requestId:prepared.requestId,projectId,operation:"run_drc" as const,
+        counts:{violations:2,unconnectedItems:0}};
+    }
+  };
+  const disabled=createHttpServer(config,scoped,verify,{
+    summaryRelay:()=>relay,mcpProjectPresenceEnabled:true
+  });
+  const enabled=createHttpServer(config,scoped,verify,{
+    summaryRelay:()=>relay,mcpProjectPresenceEnabled:true,
+    mcpProjectNativeDrcEnabled:true
+  });
+  try{
+    for(const [proxy,isEnabled] of [[disabled,false],[enabled,true]] as const){
+      await new Promise<void>(resolve=>proxy.listen(0,"127.0.0.1",resolve));
+      const origin="http://127.0.0.1:"+(proxy.address() as AddressInfo).port;
+      const invoke=async(method:string,params:object,token="test-user-a",name?:string)=>{
+        const result=await fetch(origin+"/mcp",{
+          method:"POST",headers:headers(token,method,name),body:payload(method,params)
+        });
+        return {status:result.status,data:await result.json() as Record<string,any>};
+      };
+      const tools=await invoke("tools/list",{});
+      const names=(tools.data.result?.tools??[]).map((t:{name:string})=>t.name);
+      assert.equal(names.includes("get_project_drc_counts"),isEnabled);
+      if(!isEnabled)continue;
+      const unauthorized=await invoke("tools/call",{
+        name:"get_project_drc_counts",arguments:{project_id:id}
+      },"invalid","get_project_drc_counts");
+      assert.equal(unauthorized.status,401);
+      const foreign=await invoke("tools/call",{
+        name:"get_project_drc_counts",arguments:{project_id:id}
+      },"test-user-b","get_project_drc_counts");
+      assert.equal(foreign.status,200);
+      assert.doesNotMatch(JSON.stringify(foreign.data),/violations/);
+      assert.equal(reads,0);
+      const accepted=await invoke("tools/call",{
+        name:"get_project_drc_counts",arguments:{project_id:id}
+      },"test-user-a","get_project_drc_counts");
+      assert.equal(accepted.status,200,JSON.stringify(accepted.data));
+      assert.match(JSON.stringify(accepted.data),/"violations":2/);
+      assert.match(JSON.stringify(accepted.data),/"unconnectedItems":0/);
+      assert.doesNotMatch(JSON.stringify(accepted.data),/USB-C Controller|localPath|\.kicad_pcb/);
+      assert.equal(reads,1);
+      revokeDuringRead=true;
+      const revoked=await invoke("tools/call",{
+        name:"get_project_drc_counts",arguments:{project_id:id}
+      },"test-user-a","get_project_drc_counts");
+      assert.equal(revoked.status,200);
+      assert.match(JSON.stringify(revoked.data),/"available":false/);
+      assert.doesNotMatch(JSON.stringify(revoked.data),/"violations"/);
+      assert.equal(reads,2);
+    }
+  }finally{
+    grantActive=true;
+    revokeDuringRead=false;
+    for(const proxy of [disabled,enabled]){
+      if(proxy.listening)await new Promise<void>(resolve=>proxy.close(()=>resolve()));
+    }
+  }
+});
