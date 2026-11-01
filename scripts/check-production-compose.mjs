@@ -14,6 +14,7 @@ const env={...process.env,
   CONNECTOR_WS_ENABLED:"false",
   PAIRING_DEVICE_API_ENABLED:"false",
   CONNECTOR_OPERATOR_ONESHOT_ENABLED:"false",
+  CONNECTOR_OPERATOR_NATIVE_DRC_ENABLED:"false",
   CONNECTOR_INGRESS_MODE:"cloudflare",
   TRUSTED_CLOUDFLARED_PEERS:""
 };
@@ -27,6 +28,7 @@ assert.equal(config.services.app.environment.AUTH_MODE,"external");
 assert.equal(config.services.app.environment.CONNECTOR_WS_ENABLED,"false");
 assert.equal(config.services.app.environment.PAIRING_DEVICE_API_ENABLED,"false");
 assert.equal(config.services.app.environment.CONNECTOR_OPERATOR_ONESHOT_ENABLED,"false");
+assert.equal(config.services.app.environment.CONNECTOR_OPERATOR_NATIVE_DRC_ENABLED,"false");
 assert.equal(config.services.app.environment.CONNECTOR_INGRESS_MODE,"cloudflare");
 assert.equal(config.services.app.environment.TRUSTED_CLOUDFLARED_PEERS,"");
 assert.equal(config.services.app.environment.GITHUB_CLIENT_ID,"");
@@ -54,6 +56,7 @@ const pilotEnv={
   CONNECTOR_WS_ENABLED:"true",
   PAIRING_DEVICE_API_ENABLED:"true",
   CONNECTOR_OPERATOR_ONESHOT_ENABLED:"true",
+  CONNECTOR_OPERATOR_NATIVE_DRC_ENABLED:"true",
   CONNECTOR_INGRESS_MODE:"cloudflare",
   TRUSTED_CLOUDFLARED_PEERS:"172.18.0.9"
 };
@@ -63,6 +66,7 @@ const pilot=JSON.parse(execFileSync("/usr/bin/docker",
 assert.equal(pilot.services.app.environment.CONNECTOR_WS_ENABLED,"true");
 assert.equal(pilot.services.app.environment.PAIRING_DEVICE_API_ENABLED,"true");
 assert.equal(pilot.services.app.environment.CONNECTOR_OPERATOR_ONESHOT_ENABLED,"true");
+assert.equal(pilot.services.app.environment.CONNECTOR_OPERATOR_NATIVE_DRC_ENABLED,"true");
 assert.equal(pilot.services.app.environment.TRUSTED_CLOUDFLARED_PEERS,
   pilotEnv.TRUSTED_CLOUDFLARED_PEERS);
 assert.equal(pilot.services.app.environment.AUTH_MODE,"builtin");
