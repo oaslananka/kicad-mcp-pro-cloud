@@ -13,7 +13,7 @@ export function assertIngressCandidate(model,env,raw){
   assert.equal(model.services.app.environment.CONNECTOR_OPERATOR_ONESHOT_ENABLED ?? "false","false");
   assert.equal(model.services.app.environment.TRUSTED_CLOUDFLARED_PEERS ?? "","");
   assert.deepEqual(Object.keys(model.services.app.networks).sort((a,b)=>a.localeCompare(b)),
-    ["database","ingress_private"]);
+    ["connector_egress","database","ingress_private"]);
   assert.deepEqual(Object.keys(model.services.cloudflared_kicad.networks).sort((a,b)=>a.localeCompare(b)),
     ["connector_egress","ingress_private"]);
   assert.deepEqual(Object.keys(model.services.db.networks),["database"]);
