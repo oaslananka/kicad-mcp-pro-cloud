@@ -1,10 +1,11 @@
 # KiCad Cloud — isolated ingress candidate and rollback (NOT deployed)
 
-**Current stage (27 October 2026):** An existing, independently named
-KiCad-only Cloudflare Tunnel has a remotely managed route staged for the KiCad
+**Historical stage (27 October 2026):** An existing, independently named
+KiCad-only Cloudflare Tunnel had a remotely managed route staged for the KiCad
 hostname and origin `http://app:8787`, with Host header fixed and 404 fallback.
-The Tunnel is **inactive with zero connectors**, and production DNS continues
-to target the original healthy shared Tunnel. No public traffic switched.
+At that time the Tunnel was **inactive with zero connectors**, and
+production DNS still targeted the original healthy shared Tunnel. No public
+traffic had yet switched.
 The production DB has separately reached schema **012**, but device API and WSS
 are still OFF. The Free zone's only rate-limit rule remains occupied by an
 unrelated leaked-credential guard. Isolation + edge protection remains BLOCKED.
@@ -14,6 +15,39 @@ Do not start containers or alter a Cloudflare hostname route by following the
 validation instructions alone. The existing `ops-cloudflared` connector
 serves unrelated applications and MUST NOT be stopped, recreated, retokenized,
 disconnected or reconfigured as part of the KiCad change.
+
+## Verified 1 November 2026: pin the origin to the private ingress IP
+
+The dedicated Tunnel is now active. An owner-approved, time-bounded native DRC
+candidate was rolled back safely, but its WebSocket upgrade failed with 403.
+The failure has a reproducible network-source mismatch:
+
+- The remotely managed Tunnel still routes to `http://app:8787`.
+- App and dedicated connector share **two** bridges: `connector_egress` and
+  `ingress_private`. Docker resolves `app` to the **egress** app address on the
+  connector network in the verified live namespace. A TCP probe from that
+  namespace confirmed `172.23.0.2 -> 172.23.0.3`.
+- The fail-closed Cloudflare ingress verifier admits only the pinned **private**
+  connector peer, currently `10.254.242.2`. A TCP probe to the already reserved
+  app ingress address confirmed `10.254.242.2 -> 10.254.242.3`.
+
+**Required correction for the next authorized cutover:** In the existing
+KiCad-only Tunnel's remotely managed route, set the *origin Service URL* to
+`http://<KICAD_INGRESS_APP_IP>:8787` (currently
+`http://10.254.242.3:8787`), preserving the existing Host override,
+hostname and fallback. Do not use `http://app:8787` with a multihomed app.
+The actual reserved IP must be verified against the deployed Compose config;
+the sample value is not a default for other environments. This is an
+operator-approved **Cloudflare route change**, not an instruction to perform
+one merely by running tests. Never broaden `TRUSTED_CLOUDFLARED_PEERS` to
+include the egress bridge to mask the problem.
+
+After the separately approved route change, verify the connector's TCP source,
+the existing OAuth/HTTP health and an actual WSS upgrade, with the native
+feature flags still OFF unless a distinct bounded acceptance pilot is
+authorized. The earlier 403 response was not captured with its origin/edge
+provenance, so this confirms a sufficient source-trust mismatch rather than
+every possible cause of that response.
 
 ## Target security architecture
 
@@ -26,10 +60,13 @@ disconnected or reconfigured as part of the KiCad change.
   **only a new dedicated KiCad `cloudflared` connector**.
 - Connect the dedicated connector to a second, dedicated **egress** bridge
   (`kicad_cloud_connector_egress`) for Cloudflare outbound traffic.
-  Neither app nor DB joins this external egress bridge.
+  The app may also join that dedicated egress bridge to fetch OAuth client
+  metadata; the DB must not. With the app dual-homed, DNS alias `app` is not
+  a pinned private-ingress destination.
 - Run the new connector under its own remotely-managed **KiCad-only Tunnel**
   with a separately provisioned token. Its ingress service target after
-  acceptance is `http://app:8787`. Never reuse the shared Tunnel token:
+  acceptance must use the approved **private ingress app IP**, not Docker's
+  ambiguous `app` hostname. Never reuse the shared Tunnel token:
   this could inherit other applications' ingress routes.
 - The dedicated Tunnel token stays in the existing authorized Doppler
   config `kicad-mcp-pro/prd_cloud`. The Docker Compose implementation for

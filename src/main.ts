@@ -41,9 +41,14 @@ const pairingReview=identity&&connectorPool?
 const pairingDeviceEnabled=process.env.PAIRING_DEVICE_API_ENABLED==="true";
 // No additional issuer, OAuth App or domain for the optional presence-only
 // pilot. It is deliberately OFF unless the owner explicitly opts in.
-// Local user presence is weaker than independent WebAuthn and must never
-// authorize native commands or return files.
+// Local user presence is weaker than independent WebAuthn. It must never
+// authorize file contents, writes or arbitrary commands. Native DRC counts
+// require a separate explicit one-shot flag and remain a limited pilot.
 const operatorLocalOnce=process.env.CONNECTOR_OPERATOR_ONESHOT_ENABLED==="true";
+// Separate owner-operated native DRC **count-only** pilot, OFF by default.
+const operatorNativeDrc=process.env.CONNECTOR_OPERATOR_NATIVE_DRC_ENABLED==="true";
+if(operatorNativeDrc&&!operatorLocalOnce)
+  throw Error("Native DRC requires the manually operated one-shot pilot");
 if(operatorLocalOnce&&(!wsEnabled||!pairingDeviceEnabled||!identity||
     ownerConsentRuntime||process.env.OWNER_READ_CONSUMER_ENABLED==="true")){
   throw Error("Local one-shot pilot needs built-in identity, pairing and WS only");
@@ -63,14 +68,15 @@ const deviceSource=(wsEnabled||pairingDeviceEnabled)?
 // Lazy binding keeps all read surfaces absent when connector WS is disabled.
 let connectorRelay:ReturnType<typeof attachConnectorWebSocket>|null=null;
 const server=createHttpServer(config, inventory, createVerifier(config), {grants:inventory, identity:identity, devices:deviceManagement, pairings:pairingReview, pairingDevice:pairingDevice, deviceSource:deviceSource,
-  mcpProjectPresenceEnabled:operatorLocalOnce,summaryRelay:()=>connectorRelay,
+  mcpProjectPresenceEnabled:operatorLocalOnce,
+  mcpProjectNativeDrcEnabled:operatorNativeDrc,summaryRelay:()=>connectorRelay,
   ...(ownerIntentDelivery?{ownerIntentDelivery}:{})});
 const connectorWs=wsEnabled&&connectorPool?attachConnectorWebSocket(server,{
   publicOrigin:config.publicOrigin,
   sourceOf:deviceSource!,
   proofs:new PgDeviceHandshakes(connectorPool),
   ...(ownerConsentRuntime?{ownerConsent:ownerConsentRuntime.consent}:{}),
-  operatorLocalOnce,
+  operatorLocalOnce,operatorNativeDrcOnce:operatorNativeDrc,
   connections:new BoundConnectorConnections(
     new PgConnectorSessions(connectorPool),
     new PgConnectorReadGate(connectorPool))

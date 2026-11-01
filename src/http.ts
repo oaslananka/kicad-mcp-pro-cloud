@@ -19,7 +19,7 @@ import { renderLanding } from "./browser-ui.js";
 import { uiCss } from "./ui-styles.js";
 import {pairingReviewClient} from "./pairing-review-client.js";
 import type {TrustedOAuthReadIdentity} from "./connector-read-gate.js";
-import type {PreparedOwnerSummary,SummaryReadResult} from "./connector-ws.js";
+import type {PreparedOwnerSummary,SummaryReadResult,PreparedOwnerDrc,DrcReadResult} from "./connector-ws.js";
 import {OwnerSummaryHttpPreparations} from "./owner-summary-http-preparations.js";
 
 type SummaryRelay={
@@ -27,6 +27,10 @@ type SummaryRelay={
     projectId:string)=>PreparedOwnerSummary|null;
   requestSummary:(oauth:TrustedOAuthReadIdentity,deviceId:string,
     projectId:string,prepared:PreparedOwnerSummary)=>Promise<SummaryReadResult|null>;
+  prepareOwnerDrc?:(oauth:TrustedOAuthReadIdentity,deviceId:string,
+    projectId:string)=>PreparedOwnerDrc|null;
+  requestDrc?:(oauth:TrustedOAuthReadIdentity,deviceId:string,
+    projectId:string,prepared:PreparedOwnerDrc)=>Promise<DrcReadResult|null>;
 };
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -79,6 +83,8 @@ export type CloudHttpServices={
   // Metadata-only, owner-granted + manually started local one-shot pilot.
   // Never enable this from an untrusted request or merely from WS presence.
   mcpProjectPresenceEnabled?:boolean;
+  // Extra, default-OFF owner-foreground native DRC *counts only*.
+  mcpProjectNativeDrcEnabled?:boolean;
   // Trusted Cloud-to-owner HTTPS delivery only. If absent, /prepare
   // cannot claim success; a bearer client must never self-register scope.
   ownerIntentDelivery?:(scope:PreparedOwnerSummary)=>Promise<string|null>;
@@ -451,7 +457,30 @@ async function handleRequest(
           const {projectPresent,boardPresent,schematicPresent}=result.files;
           return {projectPresent,boardPresent,schematicPresent};
         } : undefined;
-      const handler=createCloudMcpHandler(inventory,actor,presenceReader);
+      const drcReader=services.mcpProjectNativeDrcEnabled&&summaryRelay?.()
+        ? async(deviceId:string,projectId:string)=>{
+          const project=await inventory.getProject(actor.sub,actor.clientId,projectId);
+          if(!project||project.deviceId!==deviceId)return null;
+          if(!await inventory.isAccessTokenAllowed(
+            actor.sub,actor.clientId,actor.issuedAt))return null;
+          try{await verify(matched[1]);}catch{return null;}
+          const relay=summaryRelay();
+          if(!relay?.prepareOwnerDrc||!relay.requestDrc)return null;
+          const oauth={ownerSub:actor.sub,clientId:actor.clientId,
+            accessTokenIssuedAtSeconds:actor.issuedAt};
+          const intent=relay.prepareOwnerDrc(oauth,deviceId,projectId);
+          if(!intent)return null;
+          const result=await relay.requestDrc(oauth,deviceId,projectId,intent);
+          if(!result||result.requestId!==intent.requestId||
+            result.projectId!==projectId||result.operation!=="run_drc")return null;
+          const current=await inventory.getProject(actor.sub,actor.clientId,projectId);
+          if(!current||current.deviceId!==deviceId)return null;
+          try{await verify(matched[1]);}catch{return null;}
+          if(!await inventory.isAccessTokenAllowed(
+            actor.sub,actor.clientId,actor.issuedAt))return null;
+          return result.counts;
+        } : undefined;
+      const handler=createCloudMcpHandler(inventory,actor,presenceReader,drcReader);
       let output: Response;
       try {
         output = await handler.fetch(request);
